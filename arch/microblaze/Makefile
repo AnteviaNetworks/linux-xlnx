@@ -48,6 +48,10 @@ CPUFLAGS-1 += $(call cc-option,-mcpu=v$(CPU_VER))
 # r31 holds current when in kernel mode
 KBUILD_CFLAGS += -ffixed-r31 $(CPUFLAGS-y) $(CPUFLAGS-1) $(CPUFLAGS-2)
 
+# GCC 10.x now has -ftree-loop-distribute-patterns by default in -O2
+# This causes a boot failure, so disable it
+KBUILD_CFLAGS += -fno-tree-loop-distribute-patterns
+
 head-y := arch/microblaze/kernel/head.o
 libs-y += arch/microblaze/lib/
 core-y += arch/microblaze/kernel/
