@@ -37,12 +37,24 @@ config XILINX_AXI_EMAC_HWTSTAMP
 	default n
 	help
 	  Generate hardware packet timestamps. This is to facilitate IEE 1588.
-config  AXIENET_HAS_MCDMA
-	bool "AXI Ethernet is configured with MCDMA"
+
+choice
+	prompt "MCDMA mode"
 	depends on XILINX_AXI_EMAC
-	default n
+	default AXIENET_HAS_MCDMA
+
+config  AXIENET_HAS_MCDMA
+	bool "AXI Ethernet is configured with dedicated MCDMA"
 	help
 	  When hardware is generated with AXI Ethernet with MCDMA select this option.
+
+config  AXIENET_USES_MCDMA_ENGINE
+	bool "AXI Ethernet is configured with shared MCDMA"
+	help
+	  When hardware is generated with AXI Ethernet using a shared MCDMA with a
+	  channel per AXI Ethernet block select this option.
+
+endchoice
 
 config XILINX_LL_TEMAC
 	tristate "Xilinx LL TEMAC (LocalLink Tri-mode Ethernet MAC) driver"
