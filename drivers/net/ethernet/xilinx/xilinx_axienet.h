@@ -27,6 +27,7 @@
 #define XAE_MAX_VLAN_FRAME_SIZE  (XAE_MTU + VLAN_ETH_HLEN + XAE_TRL_SIZE)
 #define XAE_MAX_JUMBO_FRAME_SIZE (XAE_JUMBO_MTU + XAE_HDR_SIZE + XAE_TRL_SIZE)
 
+#ifndef CONFIG_AXIENET_USES_MCDMA_ENGINE
 /* DMA address width min and max range */
 #define XAE_DMA_MASK_MIN	32
 #define XAE_DMA_MASK_MAX	64
@@ -37,6 +38,7 @@
 
 #define for_each_rx_dma_queue(lp, var) \
 	for ((var) = 0; (var) < (lp)->num_rx_queues; (var)++)
+#endif
 /* Configuration options */
 
 /* Accept all incoming packets. Default: disabled (cleared) */
@@ -81,6 +83,7 @@
 				 XAE_OPTION_FLOW_CONTROL | \
 				 XAE_OPTION_RXEN)
 
+#ifndef CONFIG_AXIENET_USES_MCDMA_ENGINE
 /* Axi DMA Register definitions */
 
 #define XAXIDMA_TX_CR_OFFSET	0x00000000 /* Channel control */
@@ -152,6 +155,7 @@
 #define XAXIDMA_BD_STS_ALL_MASK		0xFC000000 /* All status bits */
 
 #define XAXIDMA_BD_MINIMUM_ALIGNMENT	0x40
+#endif
 
 /* AXI Tx Timestamp Stream FIFO Register Definitions */
 #define XAXIFIFO_TXTS_ISR	0x00000000 /* Interrupt Status Register */
@@ -407,6 +411,7 @@
 /* USXGMII AN STS register mask definitions */
 #define USXGMII_AN_STS_COMP_MASK	BIT(16)
 
+#ifndef CONFIG_AXIENET_USES_MCDMA_ENGINE
 /* MCDMA Register Definitions */
 #define XMCDMA_CR_OFFSET	0x00
 #define XMCDMA_SR_OFFSET	0x04
@@ -478,14 +483,17 @@
 #define XMCDMA_TXWEIGHT_CH_MASK(chan_id)	GENMASK(((chan_id) * 4 + 3), \
 							(chan_id) * 4)
 #define XMCDMA_TXWEIGHT_CH_SHIFT(chan_id)	((chan_id) * 4)
+#endif
 
 /* PTP Packet length */
 #define XAE_TX_PTP_LEN		16
 #define XXV_TX_PTP_LEN		12
 
+#ifndef CONFIG_AXIENET_USES_MCDMA_ENGINE
 /* Macros used when AXI DMA h/w is configured without DRE */
 #define XAE_TX_BUFFERS		64
 #define XAE_MAX_PKT_LEN		8192
+#endif
 
 /* MRMAC Register Definitions */
 /* Configuration Registers */
@@ -562,6 +570,7 @@
 
 #define MRMAC_GT_LANE_OFFSET		BIT(16)
 #define MRMAC_MAX_GT_LANES		4
+#ifndef CONFIG_AXIENET_USES_MCDMA_ENGINE
 /**
  * struct axidma_bd - Axi Dma buffer descriptor layout
  * @next:         MM2S/S2MM Next Descriptor Pointer
@@ -660,6 +669,7 @@ struct aximcdma_bd {
 
 #define DESC_DMA_MAP_SINGLE 0
 #define DESC_DMA_MAP_PAGE 1
+#endif
 
 #if defined(CONFIG_XILINX_TSN)
 #define XAE_MAX_QUEUES		5
@@ -699,11 +709,13 @@ enum axienet_tsn_ioctl {
  * @mii_clk_div: MII bus clock divider value
  * @regs_start: Resource start for axienet device addresses
  * @regs:	Base address for the axienet_local device address space
+#ifndef CONFIG_AXIENET_USES_MCDMA_ENGINE
  * @mcdma_regs:	Base address for the aximcdma device address space
  * @napi:	Napi Structure array for all dma queues
  * @num_tx_queues: Total number of Tx DMA queues
  * @num_rx_queues: Total number of Rx DMA queues
  * @dq:		DMA queues data
+#endif
  * @phy_mode:	Phy type to identify between MII/GMII/RGMII/SGMII/1000 Base-X
  * @is_tsn:	Denotes a tsn port
  * @num_tc:	Total number of TSN Traffic classes
@@ -718,7 +730,9 @@ enum axienet_tsn_ioctl {
  * @ptp_txq:	PTP tx queue header
  * @tx_tstamp_work: PTP timestamping work queue
  * @ptp_tx_lock: PTP tx lock
+#ifndef CONFIG_AXIENET_USES_MCDMA_ENGINE
  * @dma_err_tasklet: Tasklet structure to process Axi DMA errors
+#endif
  * @eth_irq:	Axi Ethernet IRQ number
  * @options:	AxiEthernet option word
  * @last_link:	Phy link state in which the PHY was negotiated earlier
@@ -746,6 +760,7 @@ enum axienet_tsn_ioctl {
  * @eth_sclk: AXI4-Stream interface clock.
  * @eth_refclk: Stable clock used by signal delay primitives and transceivers.
  * @eth_dclk: Dynamic Reconfiguration Port(DRP) clock.
+#ifndef CONFIG_AXIENET_USES_MCDMA_ENGINE
  * @dma_sg_clk: DMA Scatter Gather Clock.
  * @dma_rx_clk: DMA S2MM Primary Clock.
  * @dma_tx_clk: DMA MM2S Primary Clock.
@@ -754,6 +769,7 @@ enum axienet_tsn_ioctl {
  * @chan_id:  MCMDA Channel id used in conjunction with weight parameter.
  * @weight:   MCDMA Channel weight value to be configured for.
  * @dma_mask: Specify the width of the DMA address space.
+#endif
  * @usxgmii_rate: USXGMII PHY speed.
  * @mrmac_rate: MRMAC speed.
  * @gt_pll: Common GT PLL mask control register space.
@@ -761,6 +777,11 @@ enum axienet_tsn_ioctl {
  * @phc_index: Index to corresponding PTP clock used.
  * @gt_lane: MRMAC GT lane index used.
  * @ptp_os_cf: CF TS of PTP PDelay req for one step usage.
+#ifdef CONFIG_AXIENET_USES_MCDMA_ENGINE
+ * @tx_chan: TX DMA channel.
+ * @rx_chan: RX DMA channel.
+ * @skb_cache: Custom skb slab allocator.
+#endif
  */
 struct axienet_local {
 	struct net_device *ndev;
@@ -779,6 +800,7 @@ struct axienet_local {
 	/* IO registers, dma functions and IRQs */
 	resource_size_t regs_start;
 	void __iomem *regs;
+#ifndef CONFIG_AXIENET_USES_MCDMA_ENGINE
 	void __iomem *mcdma_regs;
 
 	struct tasklet_struct dma_err_tasklet[XAE_MAX_QUEUES];
@@ -787,6 +809,7 @@ struct axienet_local {
 	u16    num_tx_queues;	/* Number of TX DMA queues */
 	u16    num_rx_queues;	/* Number of RX DMA queues */
 	struct axienet_dma_q *dq[XAE_MAX_QUEUES];	/* DMA queue data*/
+#endif
 
 	phy_interface_t phy_mode;
 
@@ -844,6 +867,7 @@ struct axienet_local {
 	struct clk *eth_sclk;
 	struct clk *eth_refclk;
 	struct clk *eth_dclk;
+#ifndef CONFIG_AXIENET_USES_MCDMA_ENGINE
 	struct clk *dma_sg_clk;
 	struct clk *dma_rx_clk;
 	struct clk *dma_tx_clk;
@@ -856,6 +880,7 @@ struct axienet_local {
 	u16 weight;
 
 	u8 dma_mask;
+#endif
 	u32 usxgmii_rate;
 
 	u32 mrmac_rate;		/* MRMAC speed */
@@ -864,8 +889,15 @@ struct axienet_local {
 	u32 phc_index;		/* Index to corresponding PTP clock used  */
 	u32 gt_lane;		/* MRMAC GT lane index used */
 	u64 ptp_os_cf;		/* CF TS of PTP PDelay req for one step usage */
+
+#ifdef CONFIG_AXIENET_USES_MCDMA_ENGINE
+	struct dma_chan *tx_chan;
+	struct dma_chan *rx_chan;
+	struct kmem_cache *skb_cache;
+#endif
 };
 
+#ifndef CONFIG_AXIENET_USES_MCDMA_ENGINE
 /**
  * struct axienet_dma_q - axienet private per dma queue data
  * @lp:		Parent pointer
@@ -942,6 +974,7 @@ struct axienet_dma_q {
 	unsigned long rx_packets;
 	unsigned long rx_bytes;
 };
+#endif
 
 #define AXIENET_ETHTOOLS_SSTATS_LEN 6
 #define AXIENET_TX_SSTATS_LEN(lp) ((lp)->num_tx_queues * 2)
@@ -1102,6 +1135,7 @@ static inline void axienet_rxts_iow(struct  axienet_local *lp, off_t reg,
 }
 #endif
 
+#ifndef CONFIG_AXIENET_USES_MCDMA_ENGINE
 /**
  * axienet_dma_in32 - Memory mapped Axi DMA register read
  * @q:		Pointer to DMA queue structure
@@ -1149,6 +1183,7 @@ static inline void axienet_dma_bdout(struct axienet_dma_q *q,
 	writel(value, (q->dma_regs + reg));
 #endif
 }
+#endif
 
 #ifdef CONFIG_XILINX_TSN_QBV
 /**
@@ -1218,6 +1253,7 @@ int axienet_qbu_sts(struct net_device *ndev, void __user *useraddr);
 #endif
 
 int axienet_mdio_wait_until_ready(struct axienet_local *lp);
+#ifndef CONFIG_AXIENET_USES_MCDMA_ENGINE
 void __maybe_unused axienet_bd_free(struct net_device *ndev,
 				    struct axienet_dma_q *q);
 int __maybe_unused axienet_dma_q_init(struct net_device *ndev,
@@ -1227,6 +1263,7 @@ irqreturn_t __maybe_unused axienet_tx_irq(int irq, void *_ndev);
 irqreturn_t __maybe_unused axienet_rx_irq(int irq, void *_ndev);
 void axienet_start_xmit_done(struct net_device *ndev, struct axienet_dma_q *q);
 void axienet_dma_bd_release(struct net_device *ndev);
+#endif
 void __axienet_device_reset(struct axienet_dma_q *q);
 void axienet_set_mac_address(struct net_device *ndev, const void *address);
 void axienet_set_multicast_list(struct net_device *ndev);
