@@ -580,6 +580,7 @@ static int axienet_device_reset(struct net_device *ndev)
 	int ret;
 
 	if (lp->axienet_config->mactype == XAXIENET_10G_25G) {
+		dev_info(lp->dev, "{axienet_device_reset} Resetting XXV MAC IP Core (GT_RESET_REG:b0)\n");
 		/* Reset the XXV MAC */
 		val = axienet_ior(lp, XXV_GT_RESET_OFFSET);
 		val |= XXV_GT_RESET_MASK;
@@ -600,7 +601,9 @@ static int axienet_device_reset(struct net_device *ndev)
 	}
 
 	if (!lp->is_tsn) {
+		dev_info(lp->dev, "{axienet_device_reset} Resetting Rx DMA Queues...\n");
 		for_each_rx_dma_queue(lp, i) {
+		        dev_info(lp->dev, "  Rx DMA Queue[%d]\n", (int)i);
 			q = lp->dq[i];
 			__axienet_device_reset(q);
 #ifndef CONFIG_AXIENET_HAS_MCDMA
