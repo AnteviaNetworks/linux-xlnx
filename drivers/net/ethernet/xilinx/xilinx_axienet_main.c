@@ -537,6 +537,17 @@ static inline int axienet_mrmac_gt_reset(struct net_device *ndev)
 void __axienet_device_reset(struct axienet_dma_q *q)
 {
 	u32 timeout;
+#ifdef CONFIG_AXIENET_HAS_SHARED_MCDMA
+	if(axienet_shared_mcdma_should_reset(q->lp) == 0)
+	{
+		netdev_info(q->lp->ndev,
+				"Shared DMA reset skipped chan id %d\n",
+				q->chan_id);
+		return;
+	}
+	netdev_info(q->lp->ndev, "Shared DMA reset proceeding chan id %d\n",
+			q->chan_id);
+#endif
 	/* Reset Axi DMA. This would reset Axi Ethernet core as well. The reset
 	 * process of Axi DMA takes a while to complete as all pending
 	 * commands/transfers will be flushed or completed during this
@@ -1957,6 +1968,9 @@ static int axienet_open(struct net_device *ndev)
 	}
 
 	netif_tx_start_all_queues(ndev);
+#ifdef CONFIG_AXIENET_HAS_SHARED_MCDMA
+	axienet_shared_mcdma_event(EVT_MAC_OPEN_COMPLETE, lp);
+#endif
 	return 0;
 
 err_eth_irq:
@@ -2056,6 +2070,9 @@ static int axienet_stop(struct net_device *ndev)
 		if (!lp->is_tsn)
 			axienet_dma_bd_release(ndev);
 	}
+#ifdef CONFIG_AXIENET_HAS_SHARED_MCDMA
+	axienet_shared_mcdma_event(EVT_MAC_CLOSED, lp);
+#endif
 	return 0;
 }
 
@@ -2797,7 +2814,14 @@ static int __maybe_unused axienet_mcdma_probe(struct platform_device *pdev,
 		lp->dma_mask = XAE_DMA_MASK_MIN;
 	}
 
+#ifdef CONFIG_AXIENET_HAS_SHARED_MCDMA
+	lp->mcdma_regs = devm_ioremap(&pdev->dev, dmares.start,
+			resource_size(&dmares));
+	if(!lp->mcdma_regs)
+		lp->mcdma_regs = IOMEM_ERR_PTR(-ENOMEM);
+#else
 	lp->mcdma_regs = devm_ioremap_resource(&pdev->dev, &dmares);
+#endif
 	if (IS_ERR(lp->mcdma_regs)) {
 		dev_err(&pdev->dev, "iormeap failed for the dma\n");
 		ret = PTR_ERR(lp->mcdma_regs);
@@ -3265,6 +3289,9 @@ static int axienet_probe(struct platform_device *pdev)
 	ndev->max_mtu = XAE_JUMBO_MTU;
 
 	lp = netdev_priv(ndev);
+#ifdef CONFIG_AXIENET_HAS_SHARED_MCDMA
+	axienet_shared_mcdma_mac_add(lp);
+#endif
 	lp->ndev = ndev;
 	lp->dev = &pdev->dev;
 	lp->options = XAE_OPTION_DEFAULTS;
@@ -3660,6 +3687,9 @@ static int axienet_remove(struct platform_device *pdev)
 #endif
 	of_node_put(lp->phy_node);
 	lp->phy_node = NULL;
+#ifdef CONFIG_AXIENET_HAS_SHARED_MCDMA
+	axienet_shared_mcdma_mac_remove(lp);
+#endif
 
 	free_netdev(ndev);
 

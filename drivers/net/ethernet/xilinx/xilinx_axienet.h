@@ -689,6 +689,24 @@ enum axienet_tsn_ioctl {
 	SIOC_QBU_STS,
 };
 
+#ifdef CONFIG_AXIENET_HAS_SHARED_MCDMA
+enum axienet_state {
+	ST_UNLOADED = 0,
+	ST_LOADED,
+	ST_OPENED,
+	ST_CLOSED,
+	ST_ERROR,
+	ST_RESET,
+};
+
+enum axienet_event {
+        EVT_MAC_OPEN_COMPLETE,
+        EVT_MAC_CLOSED,
+        EVT_DMA_ERROR,
+        EVT_DMA_ERROR_RESET_COMPLETE,
+};
+#endif
+
 /**
  * struct axienet_local - axienet private per device data
  * @ndev:	Pointer for net_device to which it will be attached.
@@ -780,6 +798,10 @@ struct axienet_local {
 	resource_size_t regs_start;
 	void __iomem *regs;
 	void __iomem *mcdma_regs;
+#ifdef CONFIG_AXIENET_HAS_SHARED_MCDMA
+	struct axienet_local *next;
+	enum axienet_state state;
+#endif
 
 	struct tasklet_struct dma_err_tasklet[XAE_MAX_QUEUES];
 	struct napi_struct napi[XAE_MAX_QUEUES];	/* NAPI Structure */
@@ -1268,6 +1290,13 @@ void axienet_tx_hwtstamp(struct axienet_local *lp,
 #else
 void axienet_tx_hwtstamp(struct axienet_local *lp,
 			 struct axidma_bd *cur_p);
+#endif
+
+#ifdef CONFIG_AXIENET_HAS_SHARED_MCDMA
+void axienet_shared_mcdma_mac_add(struct axienet_local *lp);
+void axienet_shared_mcdma_mac_remove(struct axienet_local *lp);
+void axienet_shared_mcdma_event(enum axienet_event event, struct axienet_local *lp);
+int axienet_shared_mcdma_should_reset(struct axienet_local *lp);
 #endif
 
 #endif /* XILINX_AXI_ENET_H */

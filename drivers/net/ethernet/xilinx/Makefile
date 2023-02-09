@@ -16,6 +16,9 @@ xilinx_emac-objs := xilinx_axienet_main.o xilinx_axienet_mdio.o xilinx_axienet_d
 ifeq ($(CONFIG_AXIENET_HAS_MCDMA),y)
   xilinx_emac-objs += xilinx_axienet_mcdma.o
 endif
+ifeq ($(CONFIG_AXIENET_HAS_SHARED_MCDMA),y)
+  xilinx_emac-objs += xilinx_axienet_shared_mcdma.o
+endif
 obj-$(CONFIG_XILINX_AXI_EMAC) += xilinx_emac.o
 obj-$(CONFIG_XILINX_TSN_QBR) += xilinx_tsn_preemption.o
 #obj-$(CONFIG_AXIENET_HAS_MCDMA) += xilinx_axienet_mcdma.o

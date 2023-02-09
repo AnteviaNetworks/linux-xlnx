@@ -618,6 +618,13 @@ void __maybe_unused axienet_mcdma_err_handler(unsigned long data)
 	struct net_device *ndev = lp->ndev;
 	struct aximcdma_bd *cur_p;
 
+#ifdef CONFIG_AXIENET_HAS_SHARED_MCDMA
+	netdev_info(q->lp->ndev,
+			"Shared DMA error handler running chan id %d\n",
+			q->chan_id);
+	axienet_shared_mcdma_event(EVT_DMA_ERROR, lp);
+#endif
+
 	lp->axienet_config->setoptions(ndev, lp->options &
 				       ~(XAE_OPTION_TXEN | XAE_OPTION_RXEN));
 	__axienet_device_reset(q);
@@ -756,6 +763,9 @@ void __maybe_unused axienet_mcdma_err_handler(unsigned long data)
 	axienet_set_mac_address(ndev, NULL);
 	axienet_set_multicast_list(ndev);
 	lp->axienet_config->setoptions(ndev, lp->options);
+#ifdef CONFIG_AXIENET_HAS_SHARED_MCDMA
+	axienet_shared_mcdma_event(EVT_DMA_ERROR_RESET_COMPLETE, lp);
+#endif
 }
 
 int __maybe_unused axienet_mcdma_tx_probe(struct platform_device *pdev,
