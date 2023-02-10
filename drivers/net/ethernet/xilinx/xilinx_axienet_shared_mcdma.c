@@ -183,17 +183,17 @@ void axienet_shared_mcdma_event(enum axienet_event event,
 int axienet_shared_mcdma_should_reset(struct axienet_local *lp)
 {
 	int reset_flg = 0;
-	spin_lock(&list_lock);
+	netdev_info(lp->ndev, "MCDMA SM chan id %d checking reset state\n", lp->chan_id);
 	// If Only 1 device - just reset as normal, this is
 	// the same as a dedicated MCDMA
 	if(axienet_count_macs() < 2) {
                 netdev_info(lp->ndev,
 			"MCDMA SM chan id %d only one instance\n",
 			lp->chan_id);
-		spin_unlock(&list_lock);
 		return 1;
 	}
 
+	spin_lock(&list_lock);
 	// resets will only occur in the LOADED, CLOSED, ERROR and RESET
         // states.
 	// UNLOADED - transitory state, do not reset
@@ -261,6 +261,7 @@ int axienet_shared_mcdma_should_reset(struct axienet_local *lp)
 				lp->chan_id);
 			axienet_reset_all_other_macs(lp);
 			reset_flg = 1;
+			break;
 		case ST_CLOSED:
 			// Reset the DMA, request the dma error handler run on
 			// the other MACs to reset the DMA BD queues
@@ -269,6 +270,7 @@ int axienet_shared_mcdma_should_reset(struct axienet_local *lp)
 				lp->chan_id);
 			axienet_reset_all_other_macs(lp);
 			reset_flg = 1;
+			break;
 		case ST_RESET:
 			netdev_info(lp->ndev,
 				"MCDMA SM chan id %d RESET\n",
