@@ -71,10 +71,8 @@ struct xlnx_ptp_timer {
     int extts1_enable;
 	int countpulse;
 	u32 incval;
-    //u64 last_sec0;
-    //u64 last_sec1;
-    u64 last_ts0;
-    u64 last_ts1;
+    u64 last_sec0;
+    u64 last_sec1;
 };
 
 void __iomem *timer_baseaddr;
@@ -304,7 +302,7 @@ static irqreturn_t xlnx_ptp_timer_isr(int irq, void *priv)
 
         ts = sec * 1000000000 + nsec;
 
-        if (ts != timer->last_ts0) {
+        if (sec != timer->last_sec0) {
             extts_event.type = PTP_CLOCK_EXTTS;
             extts_event.index = 0;
             extts_event.timestamp = ts;
@@ -312,8 +310,7 @@ static irqreturn_t xlnx_ptp_timer_isr(int irq, void *priv)
 
             //pr_err("PTP TS: %lld sec, %lld nsec\n", sec, nsec);
         }
-        //timer->last_sec0 = sec;
-        timer->last_ts0 = ts;
+        timer->last_sec0 = sec;
     }
 
     /* GPS input timestamp */
@@ -326,15 +323,14 @@ static irqreturn_t xlnx_ptp_timer_isr(int irq, void *priv)
         ts = sec * 1000000000 + nsec;
 
         // pr_err("GPS TS: %lld sec, %lld nsec\n", sec, nsec);
-        if (ts != timer->last_ts1) {
+        if (sec != timer->last_sec1) {
             extts_event.type = PTP_CLOCK_EXTTS;
             extts_event.index = 1;
             extts_event.timestamp = ts;
             ptp_clock_event(timer->ptp_clock, &extts_event);
 
         }
-        //timer->last_sec1 = sec;
-        timer->last_ts1 = ts;
+        timer->last_sec1 = sec;
     }
 
     out_be32((timer->baseaddr + XTIMER1588_INTERRUPT),  (1 << XTIMER1588_INT_SHIFT) );
