@@ -42,8 +42,6 @@
 #define XTIMER1588_CF_H                 0x00030 /* Correction Field - Low */
 #define XTIMER1588_1PPS_TSTAMP_NS       0x00034 /* 1 PPS Timestamp - nanoseconds */
 #define XTIMER1588_1PPS_TSTAMP_SEC      0x00038 /* 1 PPS Timestamp - seconds */
-#define XTIMER1588_GPS_TSTAMP_NS        0x00400 /* GPS 1 PPS Timestamp - nanoseconds */
-#define XTIMER1588_GPS_TSTAMP_SEC       0x00404 /* GPS 1 PPS Timestamp - seconds */
 
 #define XTIMER1588_RTC_MASK  ((1 << 26) - 1)
 #define XTIMER1588_INT_SHIFT 0
@@ -67,12 +65,10 @@ struct xlnx_ptp_timer {
 	spinlock_t	reg_lock;
 	int irq;
 	int pps_enable;
-    int extts0_enable;
-    int extts1_enable;
+    int extts_enable;
 	int countpulse;
 	u32 incval;
-    u64 last_sec0;
-    u64 last_sec1;
+    u64 last_sec;
 };
 
 void __iomem *timer_baseaddr;
@@ -226,29 +222,20 @@ static int xlnx_ptp_settime(struct ptp_clock_info *ptp,
 static int xlnx_ptp_enable(struct ptp_clock_info *ptp,
 			  struct ptp_clock_request *rq, int on)
 {
-    struct xlnx_ptp_timer *timer = container_of(ptp, struct xlnx_ptp_timer,
+	struct xlnx_ptp_timer *timer = container_of(ptp, struct xlnx_ptp_timer,
                                               ptp_clock_info);
 
 
-    switch (rq->type) {
-    case PTP_CLK_REQ_PPS:
-    	timer->pps_enable = 1;
-    	return 0;
-    case PTP_CLK_REQ_EXTTS:
-        switch (rq->extts.index) {
-            case 0:
-                timer->extts0_enable = on ? 1 : 0;
-                break;
-            case 1:
-                timer->extts1_enable = on ? 1 : 0;
-                break;
-            default:
-                return -EINVAL;
-        }
-    	return 0;
-    default:
-    	break;
-    }
+	  switch (rq->type) {
+		case PTP_CLK_REQ_PPS:
+			timer->pps_enable = 1;
+			return 0;
+		case PTP_CLK_REQ_EXTTS:
+			timer->extts_enable = on ? 1 : 0;
+			return 0;
+		default:
+			break;
+	}
 
 	return -EOPNOTSUPP;
 }
@@ -257,7 +244,7 @@ static struct ptp_clock_info xlnx_ptp_clock_info = {
 	.owner    = THIS_MODULE,
 	.name     = "Xilinx Timer",
 	.max_adj  = 999999999,
-	.n_ext_ts = 2,
+	.n_ext_ts	= 1,
 	.pps      = 1,
 	.adjfreq  = xlnx_ptp_adjfreq,
 	.adjtime  = xlnx_ptp_adjtime,
@@ -293,8 +280,7 @@ static irqreturn_t xlnx_ptp_timer_isr(int irq, void *priv)
 		}
 	}
 
-    /* 1 PPS Feedback timestamp */
-    if ((timer->ptp_clock) && (timer->extts0_enable)) {
+    if ((timer->ptp_clock) && (timer->extts_enable)) {
         u64 ts, sec, nsec;
 
         nsec = in_be32(timer->baseaddr + XTIMER1588_1PPS_TSTAMP_NS);
@@ -302,40 +288,17 @@ static irqreturn_t xlnx_ptp_timer_isr(int irq, void *priv)
 
         ts = sec * 1000000000 + nsec;
 
-        if (sec != timer->last_sec0) {
+        if (sec != timer->last_sec) {
             extts_event.type = PTP_CLOCK_EXTTS;
             extts_event.index = 0;
             extts_event.timestamp = ts;
             ptp_clock_event(timer->ptp_clock, &extts_event);
-
-            //pr_err("PTP TS: %lld sec, %lld nsec\n", sec, nsec);
         }
-        timer->last_sec0 = sec;
+        timer->last_sec = sec;
     }
 
-    /* GPS input timestamp */
-    if ((timer->ptp_clock) && (timer->extts1_enable)) {
-        u64 ts, sec, nsec;
-
-        nsec = in_be32(timer->baseaddr + XTIMER1588_GPS_TSTAMP_NS);
-        sec = in_be32(timer->baseaddr + XTIMER1588_GPS_TSTAMP_SEC);
-
-        ts = sec * 1000000000 + nsec;
-
-        // pr_err("GPS TS: %lld sec, %lld nsec\n", sec, nsec);
-        if (sec != timer->last_sec1) {
-            extts_event.type = PTP_CLOCK_EXTTS;
-            extts_event.index = 1;
-            extts_event.timestamp = ts;
-            ptp_clock_event(timer->ptp_clock, &extts_event);
-
-        }
-        timer->last_sec1 = sec;
-    }
-
-    out_be32((timer->baseaddr + XTIMER1588_INTERRUPT),  (1 << XTIMER1588_INT_SHIFT) );
-
-    return IRQ_HANDLED;
+	out_be32((timer->baseaddr + XTIMER1588_INTERRUPT),  (1 << XTIMER1588_INT_SHIFT) );
+	return IRQ_HANDLED;
 }
 
 static int xlnx_ptp_timer_remove(struct platform_device *pdev)
@@ -446,7 +409,7 @@ static struct platform_driver xlnx_ptp_timer_driver = {
            .name = DRIVER_NAME,
            .owner = THIS_MODULE,
           .of_match_table = timer_1588_of_match,
-    },
+  },
 };
 
 module_platform_driver(xlnx_ptp_timer_driver);
