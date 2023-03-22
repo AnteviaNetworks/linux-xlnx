@@ -151,14 +151,14 @@ config PTP_1588_CLOCK_VMW
 	  To compile this driver as a module, choose M here: the module
 	  will be called ptp_vmw.
 
-config PTP_1588_XILINX
-	tristate "Xilinx PTP clock"
-	select PTP_1588_CLOCK
-	default y
+config PTP_1588_CLOCK_XILINX
+	tristate "XILINX PTP clock"
+	depends on PTP_1588_CLOCK
 	help
-	  This driver adds support for xilinx 1588 block. This has been
-	  updated by a Skyworks patch, was PTP_1588_CLOCK_XILINX.
+	  This driver adds support for Xilinx PTP clock. It provides
+	  timer-syncer support with time and fine adjustment capabilities.
 
-	  This driver will be automatically included in the Kernel.
+	  It is usually used with Xilinx AXI Ethernet driver with HW
+	  timestamping support.
 
 endmenu
