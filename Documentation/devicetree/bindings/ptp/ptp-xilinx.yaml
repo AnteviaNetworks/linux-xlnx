@@ -24,6 +24,14 @@ properties:
     description: |
       Offset and length of the register set for the device.
 
+  num-of-ports:
+    category: optional
+    type: int
+    description: |
+      Number of ports populated in the IP.
+    constraint: |
+      v > 0 && v <= 16
+
 required:
   - compatible
   - reg
