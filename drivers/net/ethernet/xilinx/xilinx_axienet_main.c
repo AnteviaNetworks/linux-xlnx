@@ -3600,6 +3600,9 @@ static int axienet_probe(struct platform_device *pdev)
 	}
 	axienet_set_mac_address(ndev, mac_addr);
 
+	/* port number passed in fake local MAC set in device tree */
+	ndev->dev_port = ndev->dev_addr[5];
+
 	lp->coalesce_count_rx = XAXIDMA_DFT_RX_THRESHOLD;
 	lp->coalesce_count_tx = XAXIDMA_DFT_TX_THRESHOLD;
 
