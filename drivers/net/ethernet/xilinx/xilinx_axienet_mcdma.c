@@ -181,6 +181,7 @@ int __maybe_unused axienet_mcdma_tx_q_init(struct net_device *ndev,
 	u32 cr, chan_en;
 	int i;
 	struct axienet_local *lp = netdev_priv(ndev);
+	unsigned long __maybe_unused flags;
 
 	q->tx_bd_ci = 0;
 	q->tx_bd_tail = 0;
@@ -228,6 +229,8 @@ int __maybe_unused axienet_mcdma_tx_q_init(struct net_device *ndev,
 	 */
 	axienet_dma_bdout(q, XMCDMA_CHAN_CURDESC_OFFSET(q->chan_id),
 			  q->tx_bd_p);
+
+	axienet_shared_mcdma_lock(lp, flags);
 	cr = axienet_dma_in32(q, XMCDMA_CR_OFFSET);
 	axienet_dma_out32(q, XMCDMA_CR_OFFSET,
 			  cr | XMCDMA_CR_RUNSTOP_MASK);
@@ -238,6 +241,7 @@ int __maybe_unused axienet_mcdma_tx_q_init(struct net_device *ndev,
 	chan_en |= (1 << (q->chan_id - 1));
 	axienet_dma_out32(q, XMCDMA_CHEN_OFFSET, chan_en);
 
+	axienet_shared_mcdma_unlock(lp, flags);
 	return 0;
 out:
 	for_each_tx_dma_queue(lp, i) {
@@ -264,6 +268,7 @@ int __maybe_unused axienet_mcdma_rx_q_init(struct net_device *ndev,
 	struct sk_buff *skb;
 	struct axienet_local *lp = netdev_priv(ndev);
 	dma_addr_t mapping;
+	unsigned long __maybe_unused flags;
 
 	q->rx_bd_ci = 0;
 	q->rx_offset = XMCDMA_CHAN_RX_OFFSET;
@@ -332,6 +337,7 @@ int __maybe_unused axienet_mcdma_rx_q_init(struct net_device *ndev,
 	 */
 	axienet_dma_bdout(q, XMCDMA_CHAN_CURDESC_OFFSET(q->chan_id) +
 			    q->rx_offset, q->rx_bd_p);
+	axienet_shared_mcdma_lock(lp, flags);
 	cr = axienet_dma_in32(q, XMCDMA_CR_OFFSET +  q->rx_offset);
 	axienet_dma_out32(q, XMCDMA_CR_OFFSET +  q->rx_offset,
 			  cr | XMCDMA_CR_RUNSTOP_MASK);
@@ -346,6 +352,7 @@ int __maybe_unused axienet_mcdma_rx_q_init(struct net_device *ndev,
 	chan_en |= (1 << (q->chan_id - 1));
 	axienet_dma_out32(q, XMCDMA_CHEN_OFFSET + q->rx_offset, chan_en);
 
+	axienet_shared_mcdma_unlock(lp, flags);
 	return 0;
 
 out:
@@ -381,9 +388,17 @@ static inline int get_mcdma_rx_q(struct axienet_local *lp, u32 chan_id)
 
 static inline int map_dma_q_txirq(int irq, struct axienet_local *lp)
 {
+	struct axienet_dma_q *q = lp->dq[0];
+
+#ifdef CONFIG_AXIENET_HAS_SHARED_MCDMA
+	/*
+	 * In shared mode there is one channel per core,
+	 * so just read the channel id from q[0]
+	 */
+	return q->chan_id;
+#else
 	int i, chan_sermask;
 	u16 chan_id = 1;
-	struct axienet_dma_q *q = lp->dq[0];
 
 	chan_sermask = axienet_dma_in32(q, XMCDMA_TXINT_SER_OFFSET);
 
@@ -394,6 +409,7 @@ static inline int map_dma_q_txirq(int irq, struct axienet_local *lp)
 	}
 
 	return -ENODEV;
+#endif
 }
 
 irqreturn_t __maybe_unused axienet_mcdma_tx_irq(int irq, void *_ndev)
@@ -448,9 +464,17 @@ out:
 
 static inline int map_dma_q_rxirq(int irq, struct axienet_local *lp)
 {
+	struct axienet_dma_q *q = lp->dq[0];
+
+#ifdef CONFIG_AXIENET_HAS_SHARED_MCDMA
+	/*
+	 * In shared mode there is one channel per core,
+	 * so just read the channel id from q[0]
+	 */
+	return q->chan_id;
+#else
 	int i, chan_sermask;
 	u16 chan_id = 1;
-	struct axienet_dma_q *q = lp->dq[0];
 
 	chan_sermask = axienet_dma_in32(q, XMCDMA_RXINT_SER_OFFSET +
 					q->rx_offset);
@@ -462,6 +486,7 @@ static inline int map_dma_q_rxirq(int irq, struct axienet_local *lp)
 	}
 
 	return -ENODEV;
+#endif
 }
 
 irqreturn_t __maybe_unused axienet_mcdma_rx_irq(int irq, void *_ndev)
@@ -617,6 +642,7 @@ void __maybe_unused axienet_mcdma_err_handler(unsigned long data)
 	struct axienet_local *lp = q->lp;
 	struct net_device *ndev = lp->ndev;
 	struct aximcdma_bd *cur_p;
+	unsigned long __maybe_unused flags;
 
 #ifdef CONFIG_AXIENET_HAS_SHARED_MCDMA
 	netdev_info(q->lp->ndev,
@@ -697,6 +723,7 @@ void __maybe_unused axienet_mcdma_err_handler(unsigned long data)
 	 */
 	axienet_dma_bdout(q, XMCDMA_CHAN_CURDESC_OFFSET(q->chan_id) +
 			    q->rx_offset, q->rx_bd_p);
+	axienet_shared_mcdma_lock(lp, flags);
 	cr = axienet_dma_in32(q, XMCDMA_CR_OFFSET +  q->rx_offset);
 	axienet_dma_out32(q, XMCDMA_CR_OFFSET +  q->rx_offset,
 			  cr | XMCDMA_CR_RUNSTOP_MASK);
@@ -726,6 +753,7 @@ void __maybe_unused axienet_mcdma_err_handler(unsigned long data)
 	chan_en = axienet_dma_in32(q, XMCDMA_CHEN_OFFSET);
 	chan_en |= (1 << (q->chan_id - 1));
 	axienet_dma_out32(q, XMCDMA_CHEN_OFFSET, chan_en);
+	axienet_shared_mcdma_unlock(lp, flags);
 
 	if (lp->axienet_config->mactype != XAXIENET_10G_25G &&
 	    lp->axienet_config->mactype != XAXIENET_MRMAC) {
@@ -774,7 +802,7 @@ int __maybe_unused axienet_mcdma_tx_probe(struct platform_device *pdev,
 {
 	int i;
 	char dma_name[24];
-	int ret = 0;
+	int __maybe_unused ret = 0;
 
 #ifdef CONFIG_XILINX_TSN
 	u32 num = XAE_TSN_MIN_QUEUES;
@@ -802,6 +830,9 @@ int __maybe_unused axienet_mcdma_tx_probe(struct platform_device *pdev,
 						      "xlnx,include-dre");
 #endif
 		spin_lock_init(&q->tx_lock);
+#ifdef CONFIG_AXIENET_HAS_SHARED_MCDMA
+		spin_lock_init(&q->shared_mcdma_reg_io_lock);
+#endif
 	}
 	of_node_put(np);
 
@@ -1022,6 +1053,7 @@ static ssize_t chan_weight_store(struct device *dev,
 	int ret;
 	u16 flags, chan_id;
 	u32 val;
+	unsigned long __maybe_unused irqflags;
 
 	ret = kstrtou16(buf, 16, &flags);
 	if (ret)
@@ -1030,6 +1062,7 @@ static ssize_t chan_weight_store(struct device *dev,
 	lp->chan_id = (flags & 0xF0) >> 4;
 	lp->weight = flags & 0x0F;
 
+	axienet_shared_mcdma_lock(lp, irqflags);
 	if (lp->chan_id < 8)
 		val = axienet_dma_in32(q, XMCDMA_TXWEIGHT0_OFFSET);
 	else
@@ -1047,6 +1080,7 @@ static ssize_t chan_weight_store(struct device *dev,
 		axienet_dma_out32(q, XMCDMA_TXWEIGHT0_OFFSET, val);
 	else
 		axienet_dma_out32(q, XMCDMA_TXWEIGHT1_OFFSET, val);
+	axienet_shared_mcdma_unlock(lp, irqflags);
 
 	return count;
 }

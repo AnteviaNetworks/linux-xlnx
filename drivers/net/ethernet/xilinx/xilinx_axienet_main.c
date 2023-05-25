@@ -807,8 +807,10 @@ void axienet_tx_hwtstamp(struct axienet_local *lp,
 		skb_hwtstamps((struct sk_buff *)cur_p->ptp_tx_skb);
 
 	val = axienet_txts_ior(lp, XAXIFIFO_TXTS_ISR);
-	if (unlikely(!(val & XAXIFIFO_TXTS_INT_RC_MASK)))
+	if (unlikely(!(val & XAXIFIFO_TXTS_INT_RC_MASK))) {
 		dev_info(lp->dev, "Did't get FIFO tx interrupt %d\n", val);
+		return;
+	}
 
 	/* If FIFO is configured in cut through Mode we will get Rx complete
 	 * interrupt even one byte is there in the fifo wait for the full packet
@@ -3290,6 +3292,7 @@ static int axienet_probe(struct platform_device *pdev)
 
 	lp = netdev_priv(ndev);
 #ifdef CONFIG_AXIENET_HAS_SHARED_MCDMA
+	spin_lock_init(&lp->shared_mcdma_lock);
 	axienet_shared_mcdma_mac_add(lp);
 #endif
 	lp->ndev = ndev;

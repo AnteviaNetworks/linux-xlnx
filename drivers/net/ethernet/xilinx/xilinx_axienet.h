@@ -799,6 +799,7 @@ struct axienet_local {
 	void __iomem *regs;
 	void __iomem *mcdma_regs;
 #ifdef CONFIG_AXIENET_HAS_SHARED_MCDMA
+	spinlock_t shared_mcdma_lock;		/* shared MCDMA global register access lock*/
 	struct axienet_local *next;
 	enum axienet_state state;
 #endif
@@ -931,6 +932,9 @@ struct axienet_dma_q {
 
 	spinlock_t tx_lock;		/* tx lock */
 	spinlock_t rx_lock;		/* rx lock */
+#ifdef CONFIG_AXIENET_HAS_SHARED_MCDMA
+	spinlock_t shared_mcdma_reg_io_lock;		/* shared MCDMA register access lock*/
+#endif
 
 	/* Buffer descriptors */
 	struct axidma_bd *tx_bd_v;
@@ -1019,6 +1023,69 @@ extern void __iomem *mrmac_gt_pll;
 extern void __iomem *mrmac_gt_ctrl;
 extern int mrmac_pll_reg;
 extern int mrmac_pll_rst;
+
+#ifdef CONFIG_AXIENET_HAS_SHARED_MCDMA
+
+/**
+ * axienet_shared_mcdma_reg_io_lock - lock shared MCDMA register access
+ * @lp:         Pointer to axienet local structure
+ * @flags:      saved interrupt state
+ *
+ * This macro performs a conditional lock for accessing shared global registers
+ * and is used to protect a single register access
+ */
+#define axienet_shared_mcdma_reg_io_lock(q, flags) \
+	spin_lock_irqsave(&(q)->shared_mcdma_reg_io_lock, flags)
+
+/**
+ * axienet_shared_mcdma_reg_io_unlock - unlock shared MCDMA register access
+ * @lp:         Pointer to axienet local structure
+ * @flags:      restored interrupt state
+ *
+ * This macro performs a conditional unlock for accessing shared global registers
+ * and is used to protect a single register access
+ */
+#define axienet_shared_mcdma_reg_io_unlock(q, flags) \
+	spin_unlock_irqrestore(&(q)->shared_mcdma_reg_io_lock, flags)
+
+/**
+ * axienet_shared_mcdma_lock - lock global shared register access
+ * @lp:         Pointer to axienet local structure
+ * @flags:      saved interrupt state
+ *
+ * This macro performs a conditional lock for accessing shared global registers
+ * and is used to protect a group of register accesses that need to be atomic
+ */
+#define axienet_shared_mcdma_lock(lp, flags) \
+	spin_lock_irqsave(&(lp)->shared_mcdma_lock, flags)
+
+/**
+ * axienet_shared_mcdma_unlock - unlock global shared register access
+ * @lp:         Pointer to axienet local structure
+ * @flags:      restored interrupt state
+ *
+ * This macro performs a conditional unlock for accessing shared global registers
+ * and is used to protect a group of register accesses that need to be atomic
+ */
+#define axienet_shared_mcdma_unlock(lp, flags) \
+	spin_unlock_irqrestore(&(lp)->shared_mcdma_lock, flags)
+
+void axienet_shared_mcdma_mac_add(struct axienet_local *lp);
+void axienet_shared_mcdma_mac_remove(struct axienet_local *lp);
+void axienet_shared_mcdma_event(enum axienet_event event, struct axienet_local *lp);
+int axienet_shared_mcdma_should_reset(struct axienet_local *lp);
+#else
+
+/*
+ * Empty definitions of the shared MCDMA lock macros
+ * when using dedicated MCDMA per ethernet core
+ */
+#define axienet_shared_mcdma_reg_io_lock(q, flags)
+#define axienet_shared_mcdma_reg_io_unlock(q, flags)
+#define axienet_shared_mcdma_lock(lp, flags)
+#define axienet_shared_mcdma_unlock(lp, flags)
+
+#endif
 
 /**
  * axienet_ior - Memory mapped Axi Ethernet register read
@@ -1135,7 +1202,12 @@ static inline void axienet_rxts_iow(struct  axienet_local *lp, off_t reg,
  */
 static inline u32 axienet_dma_in32(struct axienet_dma_q *q, off_t reg)
 {
-	return ioread32(q->dma_regs + reg);
+	u32 val;
+	unsigned long __maybe_unused flags;
+	axienet_shared_mcdma_reg_io_lock(q, flags);
+	val = ioread32(q->dma_regs + reg);
+	axienet_shared_mcdma_reg_io_unlock(q, flags);
+	return val;
 }
 
 /**
@@ -1150,7 +1222,10 @@ static inline u32 axienet_dma_in32(struct axienet_dma_q *q, off_t reg)
 static inline void axienet_dma_out32(struct axienet_dma_q *q,
 				     off_t reg, u32 value)
 {
+	unsigned long __maybe_unused flags;
+	axienet_shared_mcdma_reg_io_lock(q, flags);
 	iowrite32(value, q->dma_regs + reg);
+	axienet_shared_mcdma_reg_io_unlock(q, flags);
 }
 
 /**
@@ -1290,13 +1365,6 @@ void axienet_tx_hwtstamp(struct axienet_local *lp,
 #else
 void axienet_tx_hwtstamp(struct axienet_local *lp,
 			 struct axidma_bd *cur_p);
-#endif
-
-#ifdef CONFIG_AXIENET_HAS_SHARED_MCDMA
-void axienet_shared_mcdma_mac_add(struct axienet_local *lp);
-void axienet_shared_mcdma_mac_remove(struct axienet_local *lp);
-void axienet_shared_mcdma_event(enum axienet_event event, struct axienet_local *lp);
-int axienet_shared_mcdma_should_reset(struct axienet_local *lp);
 #endif
 
 #endif /* XILINX_AXI_ENET_H */
