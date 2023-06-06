@@ -807,13 +807,11 @@ void axienet_tx_hwtstamp(struct axienet_local *lp,
 		skb_hwtstamps((struct sk_buff *)cur_p->ptp_tx_skb);
 
 	val = axienet_txts_ior(lp, XAXIFIFO_TXTS_ISR);
-	if (unlikely(!(val & XAXIFIFO_TXTS_INT_RC_MASK))) {
+	if (unlikely(!(val & XAXIFIFO_TXTS_INT_RC_MASK)))
 		dev_info(lp->dev, "Did't get FIFO tx interrupt %d\n", val);
-		return;
-	}
 
-	/* If FIFO is configured in cut through Mode we will get Rx complete
-	 * interrupt even one byte is there in the fifo wait for the full packet
+	/* Hardware loads the TX TS FIFO after DMA TX complete interrupt is asserted,
+	 * wait for the 12 byte timestamp packet
 	 */
 	err = readl_poll_timeout_atomic(lp->tx_ts_regs + XAXIFIFO_TXTS_RLR, val,
 					((val & XAXIFIFO_TXTS_RXFD_MASK) >=
@@ -897,6 +895,10 @@ static void axienet_rx_hwtstamp(struct axienet_local *lp,
 	int err = 0;
 	struct skb_shared_hwtstamps *shhwtstamps = skb_hwtstamps(skb);
 
+	/* Hardware loads the RX TS FIFO before DMA RX interrupt is asserted,
+	 * There should be no need to wait for 12 byte timestamp packet unless
+	 * FIFO is configured in cut-through mode.
+	 *.
 	val = axienet_rxts_ior(lp, XAXIFIFO_TXTS_ISR);
 	if (unlikely(!(val & XAXIFIFO_TXTS_INT_RC_MASK))) {
 		dev_info(lp->dev, "Did't get FIFO rx interrupt %d\n", val);
@@ -904,8 +906,10 @@ static void axienet_rx_hwtstamp(struct axienet_local *lp,
 	}
 
 	val = axienet_rxts_ior(lp, XAXIFIFO_TXTS_RFO);
-	if (!val)
+	if (!val) {
+		netdev_err(lp->ndev, "%s: RX Timestamp FIFO is empty", __func__);
 		return;
+	}
 
 	/* If FIFO is configured in cut through Mode we will get Rx complete
 	 * interrupt even one byte is there in the fifo wait for the full packet
