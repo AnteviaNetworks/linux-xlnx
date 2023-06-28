@@ -975,7 +975,7 @@ static void axienet_rx_hwtstamp(struct axienet_local *lp,
 					((val & XAXIFIFO_TXTS_RXFD_MASK) >= 12),
 					0, 1000000);
 
-	t1 = ktime_to_ns(ktime_get_real())
+	t1 = ktime_to_ns(ktime_get_real());
 	if (err) {
 		//netdev_err(lp->ndev, "%s: Didn't get the full timestamp packet",
 		//	   __func__);
