@@ -707,6 +707,46 @@ enum axienet_event {
 };
 #endif
 
+#ifdef CONFIG_XILINX_AXI_EMAC_HWTSTAMP
+#define AXIENET_ETHTOOLS_HWTSTAMP_SSTATS_LEN   24    // must be even, add stats in pairs
+#define AXEENET_HWSTAMP_ROLLING_WINDOW_SZ       64
+#define AXEENET_HWSTAMP_ROLLING_WINDOW_BITS     6
+#define AXEENET_ISR_ROLLING_WINDOW_SZ           16
+#define AXEENET_ISR_ROLLING_WINDOW_BITS         4
+struct hwtstamp_stats {
+       u64 tx_tstamps;             // v
+       u64 rx_tstamps;             // v
+       u64 tx_ts_reads;            // v
+       u64 rx_ts_reads;            // v
+       u64 tx_no_interrupt;        // v
+       u64 rx_no_interrupt;        // v
+       u64 tx_rfo_empty;           // not used, always 0
+       u64 rx_rfo_empty;           // v
+       u64 tx_rfo_hi_mark;         // not used, always 0
+       u64 rx_rfo_hi_mark;         // v
+       u64 tx_rlr_incomplete;      // v
+       u64 rx_rlr_incomplete;      // v
+       u64 tx_rlr_rd_avg_delay_ns; // v
+       u64 rx_rlr_rd_avg_delay_ns; // v
+       u64 tx_rlr_rd_max_delay_ns; // v
+       u64 rx_rlr_rd_max_delay_ns; // v
+       u64 tx_tag_mismatch;
+       u64 rx_tag_mismatch;        // not used, always 0
+       u64 tx_isr_min_delay_ns;
+       u64 rx_isr_min_delay_ns;
+       u64 tx_isr_avg_delay_ns;
+       u64 rx_isr_avg_delay_ns;
+       u64 tx_isr_max_delay_ns;
+       u64 rx_isr_max_delay_ns;
+       s64 rx_window[AXEENET_HWSTAMP_ROLLING_WINDOW_SZ];
+       s64 tx_window[AXEENET_HWSTAMP_ROLLING_WINDOW_SZ];
+       s64 rx_isr_window[AXEENET_ISR_ROLLING_WINDOW_SZ];
+       s64 tx_isr_window[AXEENET_ISR_ROLLING_WINDOW_SZ];
+};
+#else
+#define AXIENET_ETHTOOLS_HWTSTAMP_SSTATS_LEN   0
+#endif
+
 /**
  * struct axienet_local - axienet private per device data
  * @ndev:	Pointer for net_device to which it will be attached.
@@ -802,6 +842,11 @@ struct axienet_local {
 	spinlock_t shared_mcdma_lock;		/* shared MCDMA global register access lock*/
 	struct axienet_local *next;
 	enum axienet_state state;
+#endif
+#ifdef CONFIG_XILINX_AXI_EMAC_HWTSTAMP
+       struct hwtstamp_stats tstats;
+       s64 tx_isr_rtc_start;
+       s64 rx_isr_rtc_start;
 #endif
 
 	struct tasklet_struct dma_err_tasklet[XAE_MAX_QUEUES];
@@ -969,7 +1014,7 @@ struct axienet_dma_q {
 	unsigned long rx_bytes;
 };
 
-#define AXIENET_ETHTOOLS_SSTATS_LEN 6
+#define AXIENET_ETHTOOLS_SSTATS_LEN 6 + AXIENET_ETHTOOLS_HWTSTAMP_SSTATS_LEN
 #define AXIENET_TX_SSTATS_LEN(lp) ((lp)->num_tx_queues * 2)
 #define AXIENET_RX_SSTATS_LEN(lp) ((lp)->num_rx_queues * 2)
 

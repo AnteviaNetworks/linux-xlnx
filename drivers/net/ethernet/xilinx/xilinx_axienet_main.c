@@ -206,6 +206,32 @@ static struct axienet_ethtools_stat axienet_get_ethtools_strings_stats[] = {
 	{ "rx_bytes" },
 	{ "tx_errors" },
 	{ "rx_errors" },
+#ifdef CONFIG_XILINX_AXI_EMAC_HWTSTAMP
+	{ "tx_tstamps" },
+	{ "rx_tstamps" },
+	{ "tx_ts_reads" },
+	{ "rx_ts_reads" },
+	{ "tx_no_interrupt" },
+	{ "rx_no_interrupt" },
+	{ "tx_rfo_empty" },
+	{ "rx_rfo_empty" },
+	{ "tx_rfo_hi_mark" },
+	{ "rx_rfo_hi_mark" },
+	{ "tx_rlr_incomplete" },
+	{ "rx_rlr_incomplete" },
+	{ "tx_rlr_rd_avg_delay_ns" },
+	{ "rx_rlr_rd_avg_delay_ns" },
+	{ "tx_rlr_rd_max_delay_ns" },
+	{ "rx_rlr_rd_max_delay_ns" },
+	{ "tx_tag_mismatch" },
+	{ "rx_tag_mismatch" },
+	{ "tx_isr_min_delay_ns" },
+	{ "rx_isr_min_delay_ns" },
+	{ "tx_isr_avg_delay_ns" },
+	{ "rx_isr_avg_delay_ns" },
+	{ "tx_isr_max_delay_ns" },
+	{ "rx_isr_max_delay_ns" },
+#endif
 };
 
 /**
@@ -803,12 +829,20 @@ void axienet_tx_hwtstamp(struct axienet_local *lp,
 	u64 time64;
 	int err = 0;
 	u32 count, len = lp->axienet_config->tx_ptplen;
+	s64 trlr, t0, t1, last;
 	struct skb_shared_hwtstamps *shhwtstamps =
 		skb_hwtstamps((struct sk_buff *)cur_p->ptp_tx_skb);
 
+	++lp->tstats.tx_ts_reads;
+
 	val = axienet_txts_ior(lp, XAXIFIFO_TXTS_ISR);
-	if (unlikely(!(val & XAXIFIFO_TXTS_INT_RC_MASK)))
-		dev_info(lp->dev, "Did't get FIFO tx interrupt %d\n", val);
+	if (unlikely(!(val & XAXIFIFO_TXTS_INT_RC_MASK))) {
+		//dev_info(lp->dev, "Did't get FIFO tx interrupt %d\n", val);
+		++lp->tstats.tx_no_interrupt;
+		goto skb_exit;
+	}
+
+	t0 = ktime_to_ns(ktime_get_real());
 
 	/* Hardware loads the TX TS FIFO after DMA TX complete interrupt is asserted,
 	 * wait for the 12 byte timestamp packet
@@ -816,11 +850,24 @@ void axienet_tx_hwtstamp(struct axienet_local *lp,
 	err = readl_poll_timeout_atomic(lp->tx_ts_regs + XAXIFIFO_TXTS_RLR, val,
 					((val & XAXIFIFO_TXTS_RXFD_MASK) >=
 					len), 0, 1000000);
+
+	t1 = ktime_to_ns(ktime_get_real());
 	if (err) {
-		netdev_err(lp->ndev, "%s: Didn't get the full timestamp packet",
-			   __func__);
+		//netdev_err(lp->ndev, "%s: Didn't get the full timestamp packet",
+		//	   __func__);
+		++lp->tstats.tx_rlr_incomplete;
 		goto skb_exit;
 	}
+	trlr = t1 - t0;
+	if(trlr > lp->tstats.tx_rlr_rd_max_delay_ns)
+		lp->tstats.tx_rlr_rd_max_delay_ns = trlr;
+
+	// this will be off until the sliding buffer window fills
+	last = lp->tstats.tx_window[lp->tstats.tx_tstamps%AXEENET_HWSTAMP_ROLLING_WINDOW_SZ];
+	trlr >>= AXEENET_HWSTAMP_ROLLING_WINDOW_BITS;
+	lp->tstats.tx_window[lp->tstats.tx_tstamps%AXEENET_HWSTAMP_ROLLING_WINDOW_SZ] = trlr;
+	lp->tstats.tx_rlr_rd_avg_delay_ns += (trlr - last);
+	++lp->tstats.tx_tstamps;
 
 	nsec = axienet_txts_ior(lp, XAXIFIFO_TXTS_RXFD);
 	sec  = axienet_txts_ior(lp, XAXIFIFO_TXTS_RXFD);
@@ -830,6 +877,7 @@ void axienet_tx_hwtstamp(struct axienet_local *lp,
 		cur_p->ptp_tx_ts_tag, val, sec, nsec);
 
 	if (val != cur_p->ptp_tx_ts_tag) {
+		++lp->tstats.tx_tag_mismatch;
 		count = axienet_txts_ior(lp, XAXIFIFO_TXTS_RFO);
 		while (count) {
 			nsec = axienet_txts_ior(lp, XAXIFIFO_TXTS_RXFD);
@@ -894,22 +942,31 @@ static void axienet_rx_hwtstamp(struct axienet_local *lp,
 	u64 time64;
 	int err = 0;
 	struct skb_shared_hwtstamps *shhwtstamps = skb_hwtstamps(skb);
+	s64 trlr, t0, t1, last;
+
+	++lp->tstats.rx_ts_reads;
 
 	/* Hardware loads the RX TS FIFO before DMA RX interrupt is asserted,
 	 * There should be no need to wait for 12 byte timestamp packet unless
 	 * FIFO is configured in cut-through mode.
-	 *.
+	 */
 	val = axienet_rxts_ior(lp, XAXIFIFO_TXTS_ISR);
 	if (unlikely(!(val & XAXIFIFO_TXTS_INT_RC_MASK))) {
-		dev_info(lp->dev, "Did't get FIFO rx interrupt %d\n", val);
+		//dev_info(lp->dev, "Did't get FIFO rx interrupt %d\n", val);
+		++lp->tstats.rx_no_interrupt;
 		return;
 	}
 
 	val = axienet_rxts_ior(lp, XAXIFIFO_TXTS_RFO);
 	if (!val) {
-		netdev_err(lp->ndev, "%s: RX Timestamp FIFO is empty", __func__);
+		//netdev_err(lp->ndev, "%s: RX Timestamp FIFO is empty", __func__);
+		++lp->tstats.rx_rfo_empty;
 		return;
 	}
+	if(val > 256)
+		++lp->tstats.rx_rfo_hi_mark;
+
+	t0 = ktime_to_ns(ktime_get_real());
 
 	/* If FIFO is configured in cut through Mode we will get Rx complete
 	 * interrupt even one byte is there in the fifo wait for the full packet
@@ -917,11 +974,24 @@ static void axienet_rx_hwtstamp(struct axienet_local *lp,
 	err = readl_poll_timeout_atomic(lp->rx_ts_regs + XAXIFIFO_TXTS_RLR, val,
 					((val & XAXIFIFO_TXTS_RXFD_MASK) >= 12),
 					0, 1000000);
+
+	t1 = ktime_to_ns(ktime_get_real())
 	if (err) {
-		netdev_err(lp->ndev, "%s: Didn't get the full timestamp packet",
-			   __func__);
+		//netdev_err(lp->ndev, "%s: Didn't get the full timestamp packet",
+		//	   __func__);
+		++lp->tstats.rx_rlr_incomplete;
 		return;
 	}
+	trlr = t1 - t0;
+	if(trlr > lp->tstats.rx_rlr_rd_max_delay_ns)
+		lp->tstats.rx_rlr_rd_max_delay_ns = trlr;
+
+	// this will be off until the sliding buffer window fills
+	last = lp->tstats.rx_window[lp->tstats.rx_tstamps%AXEENET_HWSTAMP_ROLLING_WINDOW_SZ];
+	trlr >>= AXEENET_HWSTAMP_ROLLING_WINDOW_BITS;
+	lp->tstats.rx_window[lp->tstats.rx_tstamps%AXEENET_HWSTAMP_ROLLING_WINDOW_SZ] = trlr;
+	lp->tstats.rx_rlr_rd_avg_delay_ns += (trlr - last);
+	++lp->tstats.rx_tstamps;
 
 	nsec = axienet_rxts_ior(lp, XAXIFIFO_TXTS_RXFD);
 	sec  = axienet_rxts_ior(lp, XAXIFIFO_TXTS_RXFD);
@@ -968,6 +1038,9 @@ void axienet_start_xmit_done(struct net_device *ndev,
 	struct axidma_bd *cur_p;
 #endif
 	unsigned int status = 0;
+#ifdef CONFIG_XILINX_AXI_EMAC_HWTSTAMP
+	lp->tx_isr_rtc_start = ktime_to_ns(ktime_get_real());
+#endif
 
 #ifdef CONFIG_AXIENET_HAS_MCDMA
 	cur_p = &q->txq_bd_v[q->tx_bd_ci];
@@ -1508,6 +1581,9 @@ static int axienet_recv(struct net_device *ndev, int budget,
 	struct axidma_bd *cur_p;
 #endif
 	unsigned int numbdfree = 0;
+#ifdef CONFIG_XILINX_AXI_EMAC_HWTSTAMP
+	lp->rx_isr_rtc_start = ktime_to_ns(ktime_get_real());
+#endif
 
 	/* Get relevat BD status value */
 	rmb();
@@ -2712,6 +2788,9 @@ void axienet_ethtools_get_stats(struct net_device *ndev,
 				u64 *data)
 {
 	unsigned int i = 0;
+#ifdef CONFIG_XILINX_AXI_EMAC_HWTSTAMP
+	struct axienet_local *lp = netdev_priv(ndev);
+#endif
 
 	data[i++] = ndev->stats.tx_packets;
 	data[i++] = ndev->stats.rx_packets;
@@ -2719,6 +2798,32 @@ void axienet_ethtools_get_stats(struct net_device *ndev,
 	data[i++] = ndev->stats.rx_bytes;
 	data[i++] = ndev->stats.tx_errors;
 	data[i++] = ndev->stats.rx_missed_errors + ndev->stats.rx_frame_errors;
+#ifdef CONFIG_XILINX_AXI_EMAC_HWTSTAMP
+	data[i++] = lp->tstats.tx_tstamps;
+	data[i++] = lp->tstats.rx_tstamps;
+	data[i++] = lp->tstats.tx_ts_reads;
+	data[i++] = lp->tstats.rx_ts_reads;
+	data[i++] = lp->tstats.tx_no_interrupt;
+	data[i++] = lp->tstats.rx_no_interrupt;
+	data[i++] = lp->tstats.tx_rfo_empty;
+	data[i++] = lp->tstats.rx_rfo_empty;
+	data[i++] = lp->tstats.tx_rfo_hi_mark;
+	data[i++] = lp->tstats.rx_rfo_hi_mark;
+	data[i++] = lp->tstats.tx_rlr_incomplete;
+	data[i++] = lp->tstats.rx_rlr_incomplete;
+	data[i++] = lp->tstats.tx_rlr_rd_avg_delay_ns;
+	data[i++] = lp->tstats.rx_rlr_rd_avg_delay_ns;
+	data[i++] = lp->tstats.tx_rlr_rd_max_delay_ns;
+	data[i++] = lp->tstats.rx_rlr_rd_max_delay_ns;
+	data[i++] = lp->tstats.tx_tag_mismatch;
+	data[i++] = lp->tstats.rx_tag_mismatch;
+	data[i++] = lp->tstats.tx_isr_min_delay_ns;
+	data[i++] = lp->tstats.rx_isr_min_delay_ns;
+	data[i++] = lp->tstats.tx_isr_avg_delay_ns;
+	data[i++] = lp->tstats.rx_isr_avg_delay_ns;
+	data[i++] = lp->tstats.tx_isr_max_delay_ns;
+	data[i++] = lp->tstats.rx_isr_max_delay_ns;
+#endif
 
 #ifdef CONFIG_AXIENET_HAS_MCDMA
 	axienet_get_stats(ndev, stats, data);
@@ -3718,6 +3823,11 @@ static void axienet_shutdown(struct platform_device *pdev)
 
 	rtnl_unlock();
 }
+
+void set_phc_offset(s64 offset)
+{
+}
+EXPORT_SYMBOL(set_phc_offset);
 
 static struct platform_driver axienet_driver = {
 	.probe = axienet_probe,
