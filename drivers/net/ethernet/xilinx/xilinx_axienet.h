@@ -708,11 +708,7 @@ enum axienet_event {
 #endif
 
 #ifdef CONFIG_XILINX_AXI_EMAC_HWTSTAMP
-#define AXIENET_ETHTOOLS_HWTSTAMP_SSTATS_LEN   24    // must be even, add stats in pairs
-#define AXEENET_HWSTAMP_ROLLING_WINDOW_SZ       64
-#define AXEENET_HWSTAMP_ROLLING_WINDOW_BITS     6
-#define AXEENET_ISR_ROLLING_WINDOW_SZ           16
-#define AXEENET_ISR_ROLLING_WINDOW_BITS         4
+#define AXIENET_ETHTOOLS_HWTSTAMP_SSTATS_LEN   18    // must be even, add stats in pairs
 struct hwtstamp_stats {
        u64 tx_tstamps;             // v
        u64 rx_tstamps;             // v
@@ -732,16 +728,6 @@ struct hwtstamp_stats {
        u64 rx_rlr_rd_max_delay_ns; // v
        u64 tx_tag_mismatch;
        u64 rx_tag_mismatch;        // not used, always 0
-       u64 tx_isr_min_delay_ns;
-       u64 rx_isr_min_delay_ns;
-       u64 tx_isr_avg_delay_ns;
-       u64 rx_isr_avg_delay_ns;
-       u64 tx_isr_max_delay_ns;
-       u64 rx_isr_max_delay_ns;
-       s64 rx_window[AXEENET_HWSTAMP_ROLLING_WINDOW_SZ];
-       s64 tx_window[AXEENET_HWSTAMP_ROLLING_WINDOW_SZ];
-       s64 rx_isr_window[AXEENET_ISR_ROLLING_WINDOW_SZ];
-       s64 tx_isr_window[AXEENET_ISR_ROLLING_WINDOW_SZ];
 };
 #else
 #define AXIENET_ETHTOOLS_HWTSTAMP_SSTATS_LEN   0
@@ -845,8 +831,6 @@ struct axienet_local {
 #endif
 #ifdef CONFIG_XILINX_AXI_EMAC_HWTSTAMP
        struct hwtstamp_stats tstats;
-       s64 tx_isr_rtc_start;
-       s64 rx_isr_rtc_start;
 #endif
 
 	struct tasklet_struct dma_err_tasklet[XAE_MAX_QUEUES];

@@ -225,12 +225,6 @@ static struct axienet_ethtools_stat axienet_get_ethtools_strings_stats[] = {
 	{ "rx_rlr_rd_max_delay_ns" },
 	{ "tx_tag_mismatch" },
 	{ "rx_tag_mismatch" },
-	{ "tx_isr_min_delay_ns" },
-	{ "rx_isr_min_delay_ns" },
-	{ "tx_isr_avg_delay_ns" },
-	{ "rx_isr_avg_delay_ns" },
-	{ "tx_isr_max_delay_ns" },
-	{ "rx_isr_max_delay_ns" },
 #endif
 };
 
@@ -862,11 +856,6 @@ void axienet_tx_hwtstamp(struct axienet_local *lp,
 	if(trlr > lp->tstats.tx_rlr_rd_max_delay_ns)
 		lp->tstats.tx_rlr_rd_max_delay_ns = trlr;
 
-	// this will be off until the sliding buffer window fills
-	last = lp->tstats.tx_window[lp->tstats.tx_tstamps%AXEENET_HWSTAMP_ROLLING_WINDOW_SZ];
-	trlr >>= AXEENET_HWSTAMP_ROLLING_WINDOW_BITS;
-	lp->tstats.tx_window[lp->tstats.tx_tstamps%AXEENET_HWSTAMP_ROLLING_WINDOW_SZ] = trlr;
-	lp->tstats.tx_rlr_rd_avg_delay_ns += (trlr - last);
 	++lp->tstats.tx_tstamps;
 
 	nsec = axienet_txts_ior(lp, XAXIFIFO_TXTS_RXFD);
@@ -959,7 +948,6 @@ static void axienet_rx_hwtstamp(struct axienet_local *lp,
 
 	val = axienet_rxts_ior(lp, XAXIFIFO_TXTS_RFO);
 	if (!val) {
-		//netdev_err(lp->ndev, "%s: RX Timestamp FIFO is empty", __func__);
 		++lp->tstats.rx_rfo_empty;
 		return;
 	}
@@ -986,11 +974,6 @@ static void axienet_rx_hwtstamp(struct axienet_local *lp,
 	if(trlr > lp->tstats.rx_rlr_rd_max_delay_ns)
 		lp->tstats.rx_rlr_rd_max_delay_ns = trlr;
 
-	// this will be off until the sliding buffer window fills
-	last = lp->tstats.rx_window[lp->tstats.rx_tstamps%AXEENET_HWSTAMP_ROLLING_WINDOW_SZ];
-	trlr >>= AXEENET_HWSTAMP_ROLLING_WINDOW_BITS;
-	lp->tstats.rx_window[lp->tstats.rx_tstamps%AXEENET_HWSTAMP_ROLLING_WINDOW_SZ] = trlr;
-	lp->tstats.rx_rlr_rd_avg_delay_ns += (trlr - last);
 	++lp->tstats.rx_tstamps;
 
 	nsec = axienet_rxts_ior(lp, XAXIFIFO_TXTS_RXFD);
@@ -1038,9 +1021,6 @@ void axienet_start_xmit_done(struct net_device *ndev,
 	struct axidma_bd *cur_p;
 #endif
 	unsigned int status = 0;
-#ifdef CONFIG_XILINX_AXI_EMAC_HWTSTAMP
-	lp->tx_isr_rtc_start = ktime_to_ns(ktime_get_real());
-#endif
 
 #ifdef CONFIG_AXIENET_HAS_MCDMA
 	cur_p = &q->txq_bd_v[q->tx_bd_ci];
@@ -1581,9 +1561,6 @@ static int axienet_recv(struct net_device *ndev, int budget,
 	struct axidma_bd *cur_p;
 #endif
 	unsigned int numbdfree = 0;
-#ifdef CONFIG_XILINX_AXI_EMAC_HWTSTAMP
-	lp->rx_isr_rtc_start = ktime_to_ns(ktime_get_real());
-#endif
 
 	/* Get relevat BD status value */
 	rmb();
@@ -2817,12 +2794,6 @@ void axienet_ethtools_get_stats(struct net_device *ndev,
 	data[i++] = lp->tstats.rx_rlr_rd_max_delay_ns;
 	data[i++] = lp->tstats.tx_tag_mismatch;
 	data[i++] = lp->tstats.rx_tag_mismatch;
-	data[i++] = lp->tstats.tx_isr_min_delay_ns;
-	data[i++] = lp->tstats.rx_isr_min_delay_ns;
-	data[i++] = lp->tstats.tx_isr_avg_delay_ns;
-	data[i++] = lp->tstats.rx_isr_avg_delay_ns;
-	data[i++] = lp->tstats.tx_isr_max_delay_ns;
-	data[i++] = lp->tstats.rx_isr_max_delay_ns;
 #endif
 
 #ifdef CONFIG_AXIENET_HAS_MCDMA
@@ -3823,11 +3794,6 @@ static void axienet_shutdown(struct platform_device *pdev)
 
 	rtnl_unlock();
 }
-
-void set_phc_offset(s64 offset)
-{
-}
-EXPORT_SYMBOL(set_phc_offset);
 
 static struct platform_driver axienet_driver = {
 	.probe = axienet_probe,
