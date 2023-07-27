@@ -949,7 +949,6 @@ static void axienet_rx_hwtstamp(struct axienet_local *lp,
 	val = axienet_rxts_ior(lp, XAXIFIFO_TXTS_RFO);
 	if (!val) {
 		++lp->tstats.rx_rfo_empty;
-		return;
 	}
 	if(val > 256)
 		++lp->tstats.rx_rfo_hi_mark;
