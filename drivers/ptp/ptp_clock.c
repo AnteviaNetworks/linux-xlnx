@@ -178,10 +178,19 @@ static struct posix_clock_operations ptp_clock_ops = {
 static void ptp_clock_release(struct device *dev)
 {
 	struct ptp_clock *ptp = container_of(dev, struct ptp_clock, dev);
+	struct timestamp_event_queue *tsevq;
+	unsigned long flags;
 
 	ptp_cleanup_pin_groups(ptp);
 	mutex_destroy(&ptp->tsevq_mux);
 	mutex_destroy(&ptp->pincfg_mux);
+	/* Delete first entry */
+	tsevq = list_first_entry(&ptp->tsevqs, struct timestamp_event_queue,
+				 qlist);
+	spin_lock_irqsave(&tsevq->lock, flags);
+	list_del(&tsevq->qlist);
+	spin_unlock_irqrestore(&tsevq->lock, flags);
+	kfree(tsevq);
 	ida_simple_remove(&ptp_clocks_map, ptp->index);
 	kfree(ptp);
 }
@@ -205,6 +214,7 @@ struct ptp_clock *ptp_clock_register(struct ptp_clock_info *info,
 				     struct device *parent)
 {
 	struct ptp_clock *ptp;
+	struct timestamp_event_queue *queue = NULL;
 	int err = 0, index, major = MAJOR(ptp_devt);
 
 	if (info->n_alarm > PTP_MAX_ALARMS)
@@ -226,7 +236,12 @@ struct ptp_clock *ptp_clock_register(struct ptp_clock_info *info,
 	ptp->info = info;
 	ptp->devid = MKDEV(major, index);
 	ptp->index = index;
-	spin_lock_init(&ptp->tsevq.lock);
+	INIT_LIST_HEAD(&ptp->tsevqs);
+	queue = kzalloc(sizeof(*queue), GFP_KERNEL);
+	if (!queue)
+		goto no_memory_queue;
+	spin_lock_init(&queue->lock);
+	list_add_tail(&queue->qlist, &ptp->tsevqs);
 	mutex_init(&ptp->tsevq_mux);
 	mutex_init(&ptp->pincfg_mux);
 	init_waitqueue_head(&ptp->tsev_wq);
@@ -290,6 +305,9 @@ no_pin_groups:
 kworker_err:
 	mutex_destroy(&ptp->tsevq_mux);
 	mutex_destroy(&ptp->pincfg_mux);
+	list_del(&queue->qlist);
+	kfree(queue);
+no_memory_queue:
 	ida_simple_remove(&ptp_clocks_map, index);
 no_slot:
 	kfree(ptp);
@@ -320,6 +338,7 @@ EXPORT_SYMBOL(ptp_clock_unregister);
 
 void ptp_clock_event(struct ptp_clock *ptp, struct ptp_clock_event *event)
 {
+	struct timestamp_event_queue *tsevq;
 	struct pps_event_time evt;
 
 	switch (event->type) {
@@ -328,7 +347,10 @@ void ptp_clock_event(struct ptp_clock *ptp, struct ptp_clock_event *event)
 		break;
 
 	case PTP_CLOCK_EXTTS:
-		enqueue_external_timestamp(&ptp->tsevq, event);
+		/* Enqueue timestamp on all queues */
+		list_for_each_entry(tsevq, &ptp->tsevqs, qlist) {
+			enqueue_external_timestamp(tsevq, event);
+		}
 		wake_up_interruptible(&ptp->tsev_wq);
 		break;
 
