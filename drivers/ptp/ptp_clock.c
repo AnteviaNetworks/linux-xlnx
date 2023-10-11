@@ -171,6 +171,7 @@ static struct posix_clock_operations ptp_clock_ops = {
 	.clock_settime	= ptp_clock_settime,
 	.ioctl		= ptp_ioctl,
 	.open		= ptp_open,
+	.release	= ptp_release,
 	.poll		= ptp_poll,
 	.read		= ptp_read,
 };
@@ -182,7 +183,6 @@ static void ptp_clock_release(struct device *dev)
 	unsigned long flags;
 
 	ptp_cleanup_pin_groups(ptp);
-	mutex_destroy(&ptp->tsevq_mux);
 	mutex_destroy(&ptp->pincfg_mux);
 	/* Delete first entry */
 	tsevq = list_first_entry(&ptp->tsevqs, struct timestamp_event_queue,
@@ -240,9 +240,8 @@ struct ptp_clock *ptp_clock_register(struct ptp_clock_info *info,
 	queue = kzalloc(sizeof(*queue), GFP_KERNEL);
 	if (!queue)
 		goto no_memory_queue;
-	spin_lock_init(&queue->lock);
 	list_add_tail(&queue->qlist, &ptp->tsevqs);
-	mutex_init(&ptp->tsevq_mux);
+	spin_lock_init(&queue->lock);
 	mutex_init(&ptp->pincfg_mux);
 	init_waitqueue_head(&ptp->tsev_wq);
 
@@ -303,7 +302,6 @@ no_pin_groups:
 	if (ptp->kworker)
 		kthread_destroy_worker(ptp->kworker);
 kworker_err:
-	mutex_destroy(&ptp->tsevq_mux);
 	mutex_destroy(&ptp->pincfg_mux);
 	list_del(&queue->qlist);
 	kfree(queue);
