@@ -17,6 +17,7 @@
 #include <linux/time.h>
 #include <linux/list.h>
 #include <linux/bitmap.h>
+#include <linux/debugfs.h>
 
 #define PTP_MAX_TIMESTAMPS 128
 #define PTP_BUF_TIMESTAMPS 30
@@ -29,6 +30,8 @@ struct timestamp_event_queue {
 	spinlock_t lock;
 	struct list_head qlist;
 	unsigned long *mask;
+	struct dentry *debugfs_instance;
+	struct debugfs_u32_array dfs_bitmap;
 };
 
 struct ptp_clock {
@@ -50,6 +53,7 @@ struct ptp_clock {
 	const struct attribute_group *pin_attr_groups[2];
 	struct kthread_worker *kworker;
 	struct kthread_delayed_work aux_work;
+	struct dentry *debugfs_root;
 };
 
 /*
