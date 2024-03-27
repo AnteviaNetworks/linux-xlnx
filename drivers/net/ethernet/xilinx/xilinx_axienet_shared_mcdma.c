@@ -145,35 +145,35 @@ void axienet_shared_mcdma_event(enum axienet_event event,
 	{
 	case EVT_MAC_OPEN_COMPLETE:
 		netdev_info(lp->ndev,
-			"MCDMA SM chan id %d event EVT_MAC_OPEN_COMPLETE\n",
-			lp->chan_id);
+			"MCDMA SM %s event EVT_MAC_OPEN_COMPLETE\n",
+			lp->ndev->name);
 		lp->state = ST_OPENED;
 		break;
 	case EVT_DMA_ERROR_RESET_COMPLETE:
 		netdev_info(lp->ndev,
-			"MCDMA SM chan id %d event EVT_DMA_ERROR_RESET_COMPLETE\n",
-			lp->chan_id);
+			"MCDMA SM %s event EVT_DMA_ERROR_RESET_COMPLETE\n",
+			lp->ndev->name);
 		lp->state = ST_OPENED;
 		break;
 	case EVT_MAC_CLOSED:
 		netdev_info(lp->ndev,
-			"MCDMA SM chan id %d event EVT_MAC_CLOSED\n",
-			lp->chan_id);
+			"MCDMA SM %s event EVT_MAC_CLOSED\n",
+			lp->ndev->name);
 		lp->state = ST_CLOSED;
 		break;
 	case EVT_DMA_ERROR:
 		if(lp->state != ST_RESET)
 		{
 			netdev_info(lp->ndev,
-				"MCDMA SM chan id %d event EVT_DMA_ERROR\n",
-				lp->chan_id);
+				"MCDMA SM %s event EVT_DMA_ERROR\n",
+				lp->ndev->name);
 			lp->state = ST_ERROR;
 		}
 		else
 		{
 			netdev_info(lp->ndev,
-				"MCDMA SM chan id %d event EVT_DMA_ERROR ignored while REST\n",
-				lp->chan_id);
+				"MCDMA SM %s event EVT_DMA_ERROR ignored while in RESET state\n",
+				lp->ndev->name);
 		}
 		break;
 	}
@@ -183,13 +183,13 @@ void axienet_shared_mcdma_event(enum axienet_event event,
 int axienet_shared_mcdma_should_reset(struct axienet_local *lp)
 {
 	int reset_flg = 0;
-	netdev_info(lp->ndev, "MCDMA SM chan id %d checking reset state\n", lp->chan_id);
+	netdev_info(lp->ndev, "MCDMA SM %s checking reset state\n", lp->ndev->name);
 	// If Only 1 device - just reset as normal, this is
 	// the same as a dedicated MCDMA
 	if(axienet_count_macs() < 2) {
                 netdev_info(lp->ndev,
-			"MCDMA SM chan id %d only one instance\n",
-			lp->chan_id);
+			"MCDMA SM %s only one instance\n",
+                        lp->ndev->name);
 		return 1;
 	}
 
@@ -228,21 +228,21 @@ int axienet_shared_mcdma_should_reset(struct axienet_local *lp)
 			// This state should not be seen as it is transitory
 			// prior to device driver being removed.
 			netdev_info(lp->ndev,
-				"MCDMA SM chan id %d UNLOADED\n",
-				lp->chan_id);
+				"MCDMA SM %s UNLOADED\n",
+				lp->ndev->name);
 			break;
 		case ST_LOADED:
 			// Device has been probed, but never opened
 			// Or a previous reset occurred in the CLOSED
 			// or ERROR states that moved the state back to LOADED
 			netdev_info(lp->ndev,
-				"MCDMA SM chan id %d LOADED\n",
-				lp->chan_id);
+				"MCDMA SM %s LOADED\n",
+				lp->ndev->name);
 			if(axienet_all_macs_loaded())
 			{
 				netdev_info(lp->ndev,
-					"MCDMA SM chan id %d first channel reset on LOADED\n",
-					lp->chan_id);
+					"MCDMA SM %s first channel reset on LOADED\n",
+					lp->ndev->name);
 				reset_flg = 1;
 			}
 			break;
@@ -250,15 +250,15 @@ int axienet_shared_mcdma_should_reset(struct axienet_local *lp)
 			// Device is open, we should not get a reset in this
 			// state. 
 			netdev_info(lp->ndev,
-				"MCDMA SM chan id %d OPENED\n",
-				lp->chan_id);
+				"MCDMA SM %s OPENED\n",
+				lp->ndev->name);
 			break;
 		case ST_ERROR:
 			// Reset the DMA, request the dma error handler run on
 			// the other MACs to reset the DMA BD queues
 			netdev_info(lp->ndev,
-				"MCDMA SM chan id %d ERROR\n",
-				lp->chan_id);
+				"MCDMA SM %s ERROR\n",
+				lp->ndev->name);
 			axienet_reset_all_other_macs(lp);
 			reset_flg = 1;
 			break;
@@ -266,15 +266,15 @@ int axienet_shared_mcdma_should_reset(struct axienet_local *lp)
 			// Reset the DMA, request the dma error handler run on
 			// the other MACs to reset the DMA BD queues
 			netdev_info(lp->ndev,
-				"MCDMA SM chan id %d CLOSED\n",
-				lp->chan_id);
+				"MCDMA SM %s CLOSED\n",
+				lp->ndev->name);
 			axienet_reset_all_other_macs(lp);
 			reset_flg = 1;
 			break;
 		case ST_RESET:
 			netdev_info(lp->ndev,
-				"MCDMA SM chan id %d RESET\n",
-				lp->chan_id);
+				"MCDMA SM %s RESET\n",
+				lp->ndev->name);
 			break;
 	}
 	spin_unlock(&list_lock);
