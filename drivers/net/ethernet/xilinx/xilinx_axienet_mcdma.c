@@ -777,10 +777,12 @@ void __maybe_unused axienet_mcdma_err_handler(unsigned long data)
 	    lp->axienet_config->mactype == XAXIENET_MRMAC) {
 		/* Reset the RX FIFO for MAC */
 		antevia_rx_fifo_reset(lp, RX_FIFO_CLR_RESET);
+#ifndef CONFIG_ANTEVIA_HWTSTAMP_SKB
 		axienet_rxts_iow(lp, XAXIFIFO_TXTS_RDFR,
 				 XAXIFIFO_TXTS_RESET_MASK);
 		axienet_rxts_iow(lp, XAXIFIFO_TXTS_SRR,
 				 XAXIFIFO_TXTS_RESET_MASK);
+#endif
 		axienet_txts_iow(lp, XAXIFIFO_TXTS_RDFR,
 				 XAXIFIFO_TXTS_RESET_MASK);
 		axienet_txts_iow(lp, XAXIFIFO_TXTS_SRR,

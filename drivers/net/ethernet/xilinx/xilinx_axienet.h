@@ -19,14 +19,19 @@
 #include <linux/of_platform.h>
 
 /* Packet size info */
+#ifdef CONFIG_ANTEVIA_HWTSTAMP_SKB
+#define ANT_RXTS_SIZE			16 /* size of RX timestamp field before ethernet packet */
+#else
+#define ANT_RXTS_SIZE			0  /* size of RX timestamp field before ethernet packet */
+#endif
 #define XAE_HDR_SIZE			14 /* Size of Ethernet header */
 #define XAE_TRL_SIZE			 4 /* Size of Ethernet trailer (FCS) */
 #define XAE_MTU			      1500 /* Max MTU of an Ethernet frame */
 #define XAE_JUMBO_MTU		      9000 /* Max MTU of a jumbo Eth. frame */
 
-#define XAE_MAX_FRAME_SIZE	 (XAE_MTU + XAE_HDR_SIZE + XAE_TRL_SIZE)
-#define XAE_MAX_VLAN_FRAME_SIZE  (XAE_MTU + VLAN_ETH_HLEN + XAE_TRL_SIZE)
-#define XAE_MAX_JUMBO_FRAME_SIZE (XAE_JUMBO_MTU + XAE_HDR_SIZE + XAE_TRL_SIZE)
+#define XAE_MAX_FRAME_SIZE	 (ANT_RXTS_SIZE + XAE_MTU + XAE_HDR_SIZE + XAE_TRL_SIZE)
+#define XAE_MAX_VLAN_FRAME_SIZE  (ANT_RXTS_SIZE + XAE_MTU + VLAN_ETH_HLEN + XAE_TRL_SIZE)
+#define XAE_MAX_JUMBO_FRAME_SIZE (ANT_RXTS_SIZE + XAE_JUMBO_MTU + XAE_HDR_SIZE + XAE_TRL_SIZE)
 
 /* GPIO bit to clear reset of the RX FIFO */
 #define RX_FIFO_CLR_RESET BIT(0)
@@ -892,7 +897,9 @@ struct axienet_local {
 
 #if defined(CONFIG_XILINX_AXI_EMAC_HWTSTAMP) || defined(CONFIG_XILINX_TSN_PTP)
 	void __iomem *tx_ts_regs;
+#ifndef CONFIG_ANTEVIA_HWTSTAMP_SKB
 	void __iomem *rx_ts_regs;
+#endif
 	struct hwtstamp_config tstamp_config;
 	u8 *tx_ptpheader;
 #endif
@@ -1207,6 +1214,7 @@ static inline void axienet_txts_iow(struct  axienet_local *lp, off_t reg,
 	iowrite32(value, (lp->tx_ts_regs + reg));
 }
 
+#ifndef CONFIG_ANTEVIA_HWTSTAMP_SKB
 /**
  * axienet_rxts_ior - Memory mapped AXI FIFO MM S register read
  * @lp:         Pointer to axienet_local structure
@@ -1233,6 +1241,7 @@ static inline void axienet_rxts_iow(struct  axienet_local *lp, off_t reg,
 {
 	iowrite32(value, (lp->rx_ts_regs + reg));
 }
+#endif
 #endif
 
 /**

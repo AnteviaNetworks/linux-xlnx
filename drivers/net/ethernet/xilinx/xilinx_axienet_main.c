@@ -673,7 +673,7 @@ static int axienet_device_reset(struct net_device *ndev)
 	}
 
 	if ((ndev->mtu > XAE_MTU) && (ndev->mtu <= XAE_JUMBO_MTU)) {
-		lp->max_frm_size = ndev->mtu + VLAN_ETH_HLEN +
+		lp->max_frm_size = ndev->mtu + ANT_RXTS_SIZE + VLAN_ETH_HLEN +
 					XAE_TRL_SIZE;
 		if (lp->max_frm_size <= lp->rxmem &&
 		    (lp->axienet_config->mactype != XAXIENET_10G_25G &&
@@ -710,10 +710,12 @@ static int axienet_device_reset(struct net_device *ndev)
 		}
 #ifdef CONFIG_XILINX_AXI_EMAC_HWTSTAMP
 		if (!lp->is_tsn) {
+#ifndef CONFIG_ANTEVIA_HWTSTAMP_SKB
 			axienet_rxts_iow(lp, XAXIFIFO_TXTS_RDFR,
 					 XAXIFIFO_TXTS_RESET_MASK);
 			axienet_rxts_iow(lp, XAXIFIFO_TXTS_SRR,
 					 XAXIFIFO_TXTS_RESET_MASK);
+#endif
 			axienet_txts_iow(lp, XAXIFIFO_TXTS_RDFR,
 					 XAXIFIFO_TXTS_RESET_MASK);
 			axienet_txts_iow(lp, XAXIFIFO_TXTS_SRR,
@@ -724,10 +726,12 @@ static int axienet_device_reset(struct net_device *ndev)
 
 #ifdef CONFIG_XILINX_AXI_EMAC_HWTSTAMP
 	if (lp->axienet_config->mactype == XAXIENET_MRMAC) {
+#ifndef CONFIG_ANTEVIA_HWTSTAMP_SKB
 		axienet_rxts_iow(lp, XAXIFIFO_TXTS_RDFR,
 				 XAXIFIFO_TXTS_RESET_MASK);
 		axienet_rxts_iow(lp, XAXIFIFO_TXTS_SRR,
 				 XAXIFIFO_TXTS_RESET_MASK);
+#endif
 		axienet_txts_iow(lp, XAXIFIFO_TXTS_RDFR,
 				 XAXIFIFO_TXTS_RESET_MASK);
 		axienet_txts_iow(lp, XAXIFIFO_TXTS_SRR,
@@ -939,6 +943,55 @@ static inline bool is_ptp_os_pdelay_req(struct sk_buff *skb,
 		(lp->tstamp_config.tx_type == HWTSTAMP_TX_ONESTEP_P2P));
 }
 
+#ifdef CONFIG_ANTEVIA_HWTSTAMP_SKB
+/**
+ * antevia_rx_hwtstamp - Read rx timestamp from head of skb and update it to the skbuff hwtstamps
+ * @lp:		Pointer to axienet local structure
+ * @skb:	Pointer to the sk_buff structure
+ *
+ * Return:	None.
+ */
+static void antevia_rx_hwtstamp(struct axienet_local *lp,
+				struct sk_buff *skb)
+{
+	u8 reserved[6] = {0};
+	u32 sec = 0, nsec = 0;
+	u16 tag = 0;
+	u64 time64;
+	struct skb_shared_hwtstamps *shhwtstamps = skb_hwtstamps(skb);
+
+	++lp->tstats.rx_tstamps;
+
+	/* The first 8 bytes will be the timestamp */
+	memcpy(&nsec, &skb->data[0], 4);
+	memcpy(&sec, &skb->data[4], 4);
+	/* The next 2 bytes are the tag field, but they will be zero */
+	memcpy(&tag, &skb->data[8], 2);
+	/* The last 6 bytes are padding to 128bits and will be zero */
+	memcpy(reserved, &skb->data[10], 6);
+
+	dev_dbg(lp->dev, "rx_stamp:[%04x] %u %09u\n", tag, sec, nsec);
+
+	/* Remove these 16 bytes from the buffer */
+	skb_pull(skb, 16);
+	time64 = sec * NS_PER_SEC + nsec;
+	shhwtstamps->hwtstamp = ns_to_ktime(time64);
+
+	if (is_ptp_os_pdelay_req(skb, lp)) {
+		/* Need to save PDelay resp RX time for HW 1 step
+		 * timestamping on PDelay Response.
+		 */
+		lp->ptp_os_cf = mul_u32_u32(sec, NSEC_PER_SEC);
+		lp->ptp_os_cf += nsec;
+		lp->ptp_os_cf = (lp->ptp_os_cf << 16);
+	}
+
+	if (lp->tstamp_config.rx_filter == HWTSTAMP_FILTER_ALL) {
+		time64 = sec * NS_PER_SEC + nsec;
+		shhwtstamps->hwtstamp = ns_to_ktime(time64);
+	}
+}
+#else
 /**
  * axienet_rx_hwtstamp - Read rx timestamp from hw and update it to the skbuff
  * @lp:		Pointer to axienet local structure
@@ -1015,6 +1068,7 @@ static void axienet_rx_hwtstamp(struct axienet_local *lp,
 		shhwtstamps->hwtstamp = ns_to_ktime(time64);
 	}
 }
+#endif
 #endif
 
 /**
@@ -1648,7 +1702,11 @@ static int axienet_recv(struct net_device *ndev, int budget,
 			shhwtstamps->hwtstamp = ns_to_ktime(time64);
 		} else if (lp->axienet_config->mactype == XAXIENET_10G_25G ||
 			   lp->axienet_config->mactype == XAXIENET_MRMAC) {
+#ifdef CONFIG_ANTEVIA_HWTSTAMP_SKB
+			antevia_rx_hwtstamp(lp, skb);
+#else
 			axienet_rx_hwtstamp(lp, skb);
+#endif
 		}
 	}
 #endif
@@ -3598,7 +3656,11 @@ static int axienet_probe(struct platform_device *pdev)
 
 #ifdef CONFIG_XILINX_AXI_EMAC_HWTSTAMP
 	if (!lp->is_tsn) {
+#ifndef CONFIG_ANTEVIA_HWTSTAMP_SKB
 		struct resource txtsres, rxtsres;
+#else
+		struct resource txtsres;
+#endif
 
 		/* Find AXI Stream FIFO */
 		np = of_parse_phandle(pdev->dev.of_node, "axififo-connected",
@@ -3625,6 +3687,7 @@ static int axienet_probe(struct platform_device *pdev)
 
 		if (lp->axienet_config->mactype == XAXIENET_10G_25G ||
 		    lp->axienet_config->mactype == XAXIENET_MRMAC) {
+#ifndef CONFIG_ANTEVIA_HWTSTAMP_SKB
 			np = of_parse_phandle(pdev->dev.of_node,
 					      "xlnx,rxtsfifo", 0);
 			if (IS_ERR(np)) {
@@ -3649,6 +3712,7 @@ static int axienet_probe(struct platform_device *pdev)
 				ret = PTR_ERR(lp->rx_ts_regs);
 				goto free_netdev;
 			}
+#endif
 
 			lp->tx_ptpheader = devm_kzalloc(&pdev->dev,
 							lp->axienet_config->ts_header_len,

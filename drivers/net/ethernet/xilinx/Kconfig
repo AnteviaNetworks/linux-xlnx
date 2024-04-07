@@ -38,6 +38,18 @@ config XILINX_AXI_EMAC_HWTSTAMP
 	help
 	  Generate hardware packet timestamps. This is to facilitate IEE 1588.
 
+config ANTEVIA_HWTSTAMP_SKB
+	bool "Send and receive PTP timestamps in the packet data buffer"
+	depends on XILINX_AXI_EMAC
+	select XILINX_AXI_EMAC_HWTSTAMP
+	default n
+	help
+	  RX timestamps are received in head of packets received on S2MM
+	  DMA channels. The signal to collect TX timestamp on a packet is
+	  sent in the head of packets sent on the MM2S channels. This
+	  eliminates the RX TS FIFO and the transmit half of the TX TS FIFO.
+	  RX packets and RX timestamps will never get out of sync.
+
 config AXIENET_HAS_MCDMA
 	bool "AXI Ethernet is configured with MCDMA"
 	depends on XILINX_AXI_EMAC
