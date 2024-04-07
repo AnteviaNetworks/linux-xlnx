@@ -9,6 +9,7 @@
 #ifndef XILINX_AXIENET_H
 #define XILINX_AXIENET_H
 
+#include <linux/gpio/consumer.h>
 #include <linux/netdevice.h>
 #include <linux/spinlock.h>
 #include <linux/interrupt.h>
@@ -26,6 +27,9 @@
 #define XAE_MAX_FRAME_SIZE	 (XAE_MTU + XAE_HDR_SIZE + XAE_TRL_SIZE)
 #define XAE_MAX_VLAN_FRAME_SIZE  (XAE_MTU + VLAN_ETH_HLEN + XAE_TRL_SIZE)
 #define XAE_MAX_JUMBO_FRAME_SIZE (XAE_JUMBO_MTU + XAE_HDR_SIZE + XAE_TRL_SIZE)
+
+/* GPIO bit to clear reset of the RX FIFO */
+#define RX_FIFO_CLR_RESET BIT(0)
 
 /* DMA address width min and max range */
 #define XAE_DMA_MASK_MIN	32
@@ -916,6 +920,17 @@ struct axienet_local {
 	u32 phc_index;		/* Index to corresponding PTP clock used  */
 	u32 gt_lane;		/* MRMAC GT lane index used */
 	u64 ptp_os_cf;		/* CF TS of PTP PDelay req for one step usage */
+
+	/*
+	 * RX packet FIFO reset - the RX FIFO is the stream device
+	 * connected to the MCDMA channel. This needs to be reset with
+	 * the MAC core to clear the overrun condition.
+	 * The reset is active low, bring the FIFO out of reset by setting
+	 * the GPIO high.
+	 * In RoE - the S and M-Planes can be stopped by putting the RX FIFO
+	 *        - the U-plane is stopped when the MAC core is placed in reset.
+	 */
+	struct gpio_desc *rx_fifo_reset;
 };
 
 /**
@@ -1360,6 +1375,7 @@ int xaxienet_rx_poll(struct napi_struct *napi, int quota);
 void axienet_setoptions(struct net_device *ndev, u32 options);
 int axienet_queue_xmit(struct sk_buff *skb, struct net_device *ndev,
 		       u16 map);
+int antevia_rx_fifo_reset(struct axienet_local *lp, unsigned int state);
 
 #if defined(CONFIG_AXIENET_HAS_MCDMA)
 int __maybe_unused axienet_mcdma_rx_q_init(struct net_device *ndev,

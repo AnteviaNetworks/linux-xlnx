@@ -775,6 +775,8 @@ void __maybe_unused axienet_mcdma_err_handler(unsigned long data)
 #ifdef CONFIG_XILINX_AXI_EMAC_HWTSTAMP
 	if (lp->axienet_config->mactype == XAXIENET_10G_25G ||
 	    lp->axienet_config->mactype == XAXIENET_MRMAC) {
+		/* Reset the RX FIFO for MAC */
+		antevia_rx_fifo_reset(lp, RX_FIFO_CLR_RESET);
 		axienet_rxts_iow(lp, XAXIFIFO_TXTS_RDFR,
 				 XAXIFIFO_TXTS_RESET_MASK);
 		axienet_rxts_iow(lp, XAXIFIFO_TXTS_SRR,

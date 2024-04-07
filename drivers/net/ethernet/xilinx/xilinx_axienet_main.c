@@ -589,6 +589,26 @@ void __axienet_device_reset(struct axienet_dma_q *q)
 }
 
 /**
+ * antevia_rx_fifo_reset - Reset the RX packet FIFO between DMA and MAC core
+ * @lp:		Pointer to axienet local structure
+ * @state:	State to set reset line to - 0 to set, RX_FIFO_CLR_RESET to clear
+ */
+int antevia_rx_fifo_reset(struct axienet_local *lp, unsigned int state)
+{
+	int ret;
+	state &= RX_FIFO_CLR_RESET;
+	dev_info(lp->dev, "{antevia_rx_fifo_reset} RX FIFO reset: %d\n", state ? 1 : 0);
+	if(lp->rx_fifo_reset) {
+		ret = gpiod_direction_output(lp->rx_fifo_reset, state);
+		if (ret != 0) {
+			dev_err(lp->dev, "RX FIFO reset failed\n");
+			return ret;
+		}
+	}
+	return 0;
+}
+
+/**
  * axienet_device_reset - Reset and initialize the Axi Ethernet hardware.
  * @ndev:	Pointer to the net_device structure
  *
@@ -612,6 +632,8 @@ static int axienet_device_reset(struct net_device *ndev)
 
 	if (lp->axienet_config->mactype == XAXIENET_10G_25G) {
 		dev_info(lp->dev, "{axienet_device_reset} Resetting XXV MAC IP Core (GT_RESET_REG:b0)\n");
+		/* Reset the RX FIFO for MAC */
+		antevia_rx_fifo_reset(lp, RX_FIFO_CLR_RESET);
 		/* Reset the XXV MAC */
 		val = axienet_ior(lp, XXV_GT_RESET_OFFSET);
 		val |= XXV_GT_RESET_MASK;
@@ -823,7 +845,7 @@ void axienet_tx_hwtstamp(struct axienet_local *lp,
 	u64 time64;
 	int err = 0;
 	u32 count, len = lp->axienet_config->tx_ptplen;
-	s64 trlr, t0, t1, last;
+	s64 trlr, t0, t1;
 	struct skb_shared_hwtstamps *shhwtstamps =
 		skb_hwtstamps((struct sk_buff *)cur_p->ptp_tx_skb);
 
@@ -931,7 +953,7 @@ static void axienet_rx_hwtstamp(struct axienet_local *lp,
 	u64 time64;
 	int err = 0;
 	struct skb_shared_hwtstamps *shhwtstamps = skb_hwtstamps(skb);
-	s64 trlr, t0, t1, last;
+	s64 trlr, t0, t1;
 
 	++lp->tstats.rx_ts_reads;
 
@@ -2152,7 +2174,7 @@ static int axienet_change_mtu(struct net_device *ndev, int new_mtu)
 	if (netif_running(ndev))
 		return -EBUSY;
 
-	if ((new_mtu + VLAN_ETH_HLEN +
+	if ((new_mtu + ANT_RXTS_SIZE + VLAN_ETH_HLEN +
 		XAE_TRL_SIZE) > lp->rxmem)
 		return -EINVAL;
 
@@ -3383,6 +3405,15 @@ static int axienet_probe(struct platform_device *pdev)
 	lp->rx_bd_num = RX_BD_NUM_DEFAULT;
 	lp->tx_bd_num = TX_BD_NUM_DEFAULT;
 
+	/* Keep reset high, i.e. FIFO enabled until clocks are stable */
+	/* https://support.xilinx.com/s/question/0D52E00006hpgGfSAI/builtin-fifo-reset */
+	lp->rx_fifo_reset = devm_gpiod_get(lp->dev, "rx-fifo-reset", GPIOD_OUT_HIGH);
+	if (IS_ERR(lp->rx_fifo_reset)) {
+		dev_err(&pdev->dev, "couldn't find \"rx-fifo-reset-gpios\"\n");
+		ret = PTR_ERR(lp->rx_fifo_reset);
+		goto free_netdev;
+	}
+
 #ifdef CONFIG_XILINX_TSN
 	ret = of_property_read_u16(pdev->dev.of_node, "xlnx,num-tc",
 				   &lp->num_tc);
@@ -3724,6 +3755,10 @@ static int axienet_probe(struct platform_device *pdev)
 		return ret;
 	}
 #endif
+
+	ret = antevia_rx_fifo_reset(lp, 0);
+	if (ret)
+		goto err_disable_clk;
 
 	ret = register_netdev(lp->ndev);
 	if (ret) {
