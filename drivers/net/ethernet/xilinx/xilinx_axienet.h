@@ -872,7 +872,9 @@ struct axienet_local {
 	void __iomem *qbv_regs;
 #endif
 #endif
+#ifndef CONFIG_ANTEVIA_HWTSTAMP_SKB
 	spinlock_t ptp_tx_lock;		/* PTP tx lock*/
+#endif
 	int eth_irq;
 
 	u32 options;			/* Current options word */
@@ -901,7 +903,9 @@ struct axienet_local {
 	void __iomem *rx_ts_regs;
 #endif
 	struct hwtstamp_config tstamp_config;
+#ifndef CONFIG_ANTEVIA_HWTSTAMP_SKB
 	u8 *tx_ptpheader;
+#endif
 #endif
 	struct clk *aclk;
 	struct clk *eth_sclk;
