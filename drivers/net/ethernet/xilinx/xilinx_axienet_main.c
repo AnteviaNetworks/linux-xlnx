@@ -632,7 +632,7 @@ static int axienet_device_reset(struct net_device *ndev)
 
 	if (lp->axienet_config->mactype == XAXIENET_10G_25G) {
 		dev_info(lp->dev, "{axienet_device_reset} Resetting XXV MAC IP Core (GT_RESET_REG:b0)\n");
-		/* Reset the RX FIFO for MAC */
+		/* Clear the reset on the RX FIFO for MAC */
 		antevia_rx_fifo_reset(lp, RX_FIFO_CLR_RESET);
 		/* Reset the XXV MAC */
 		val = axienet_ior(lp, XXV_GT_RESET_OFFSET);
@@ -3569,6 +3569,12 @@ static int axienet_probe(struct platform_device *pdev)
 	if (IS_ERR(lp->rx_fifo_reset)) {
 		dev_err(&pdev->dev, "couldn't find \"rx-fifo-reset-gpios\"\n");
 		ret = PTR_ERR(lp->rx_fifo_reset);
+		goto free_netdev;
+	}
+	lp->rx_fifo_enable = devm_gpiod_get(lp->dev, "rx-fifo-enable", GPIOD_OUT_HIGH);
+	if (IS_ERR(lp->rx_fifo_enable)) {
+		dev_err(&pdev->dev, "couldn't find \"rx-fifo-enable-gpios\"\n");
+		ret = PTR_ERR(lp->rx_fifo_enable);
 		goto free_netdev;
 	}
 

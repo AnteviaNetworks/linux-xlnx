@@ -33,8 +33,10 @@
 #define XAE_MAX_VLAN_FRAME_SIZE  (ANT_RXTS_SIZE + XAE_MTU + VLAN_ETH_HLEN + XAE_TRL_SIZE)
 #define XAE_MAX_JUMBO_FRAME_SIZE (ANT_RXTS_SIZE + XAE_JUMBO_MTU + XAE_HDR_SIZE + XAE_TRL_SIZE)
 
-/* GPIO bit to clear reset of the RX FIFO */
+/* GPIO bit to clear the reset of the RX FIFO */
 #define RX_FIFO_CLR_RESET BIT(0)
+/* GPIO bit to enable the RX FIFO */
+#define RX_FIFO_ENABLE BIT(1)
 
 /* DMA address width min and max range */
 #define XAE_DMA_MASK_MIN	32
@@ -942,6 +944,16 @@ struct axienet_local {
 	 *        - the U-plane is stopped when the MAC core is placed in reset.
 	 */
 	struct gpio_desc *rx_fifo_reset;
+        /*
+         * RX packet FIFO enable - starts in enabled state
+         * enabled - passes packets
+         * disabled - no packets pass
+         *
+         * FIFO transitions from enabled to disabled and disabled to enabled
+         * on packet boundaries guaranteeing a packet will not be truncated
+         * or that a partial packet will be transmitted.
+         */
+	struct gpio_desc *rx_fifo_enable;
 };
 
 /**
