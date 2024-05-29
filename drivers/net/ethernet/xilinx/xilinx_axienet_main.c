@@ -219,14 +219,21 @@ static struct axienet_ethtools_stat axienet_get_ethtools_strings_stats[] = {
 	{ "rx_rfo_hi_mark" },
 	{ "tx_rlr_incomplete" },
 	{ "rx_rlr_incomplete" },
-	{ "tx_rlr_rd_avg_delay_ns" },
+	{ "tx_rd_avg_delay_ns" },
 	{ "rx_rlr_rd_avg_delay_ns" },
-	{ "tx_rlr_rd_max_delay_ns" },
+	{ "tx_rd_max_delay_ns" },
 	{ "rx_rlr_rd_max_delay_ns" },
 	{ "tx_tag_mismatch" },
 	{ "rx_tag_mismatch" },
 #endif
 };
+
+/* limit 48 bytes in size */
+static struct axienet_ptp_skb_cb {
+	s64 t0;
+	u8 reserved[40];
+};
+static_assert(sizeof(struct axienet_ptp_skb_cb) == sizeof(((struct sk_buff *)0)->cb));
 
 /**
  * axienet_dma_bd_release - Release buffer descriptor rings
@@ -837,6 +844,160 @@ void axienet_adjust_link(struct net_device *ndev)
  *
  * Return:	None.
  */
+#ifdef CONFIG_ANTEVIA_HWTSTAMP_SKB
+u64 axienet_read_tx_hwtstamp(struct axienet_local *lp, u32 *tag)
+{
+	u32 sec = 0, nsec = 0, val;
+	u32 len = lp->axienet_config->tx_ptplen;
+	u32 count = axienet_txts_ior(lp, XAXIFIFO_TXTS_RFO);
+	if(!(count > 0)) {
+		netdev_info(lp->ndev, "TX FIFO is empty");
+		++lp->tstats.tx_rfo_empty;
+		return 0;
+	}
+
+	val = axienet_txts_ior(lp, XAXIFIFO_TXTS_RLR);
+	if((val & XAXIFIFO_TXTS_RXFD_MASK) < len) {
+		netdev_err(lp->ndev,
+			"Didn't get a full timestamp packet (only %d bytes)",
+			len);
+		++lp->tstats.tx_rlr_incomplete;
+		return 0;
+	}	
+
+	nsec = axienet_txts_ior(lp, XAXIFIFO_TXTS_RXFD);
+	sec  = axienet_txts_ior(lp, XAXIFIFO_TXTS_RXFD);
+	val = axienet_txts_ior(lp, XAXIFIFO_TXTS_RXFD);
+	*tag = ((val & XAXIFIFO_TXTS_TAG_MASK) >> XAXIFIFO_TXTS_TAG_SHIFT);
+	netdev_dbg(lp->ndev, "tx_stamp:[%04x] %04x %u %9u",
+		*tag, val, sec, nsec);
+	return sec * NS_PER_SEC + nsec;
+}
+
+void axienet_tx_hwtstamp(struct axienet_local *lp,
+			 struct aximcdma_bd *cur_p)
+{
+	u32 val;
+	u64 time64;
+	/*int err = 0;*/
+	s64 trlr, t0, t1;
+        struct axienet_ptp_skb_cb * cb;
+	/*
+	 * DMA complete intr occurs once TX PKT has been
+	 * queued for transmission. TX TS is availble only
+	 * once the packet has been sent.
+	 *
+	 * Therefore TX TS may not be available yet, so we will
+	 * queue the timestamp skbuff, in case more time
+	 * is needed for the hardware to send the packet
+	 * for which a TS was requested
+	 */
+	u32 ptp_tag, ptp_tx_ts_tag;
+	struct sk_buff *tmp_skb, *ptp_skb;
+	u32 lost;
+	struct skb_shared_hwtstamps *shhwtstamps =
+		skb_hwtstamps((struct sk_buff *)cur_p->ptp_tx_skb);
+	/* move PTP tag to timestamp field */
+	shhwtstamps->hwtstamp = cur_p->ptp_tx_ts_tag;
+	skb_queue_tail(&lp->ptp_ant_txq, (struct sk_buff *)cur_p->ptp_tx_skb);
+	cur_p->ptp_tx_skb = 0;
+	cur_p->ptp_tx_ts_tag = 0;
+	/* netdev_info(lp->ndev, "Queued PTP tag %llx, Qlen=%u",
+	 *		shhwtstamps->hwtstamp,
+	 *		skb_queue_len(&lp->ptp_ant_txq));
+	 */
+	++lp->tstats.tx_ts_reads;
+
+	val = axienet_txts_ior(lp, XAXIFIFO_TXTS_ISR);
+	if (likely(val & XAXIFIFO_TXTS_INT_RPURE_MASK))
+		netdev_err(lp->ndev,
+			"RX FIFO Receive Packet Underrun Read Error: RLR read when empty: tag %04x",
+			(u32)shhwtstamps->hwtstamp);
+	if (likely(val & XAXIFIFO_TXTS_INT_RPUE_MASK))
+		netdev_err(lp->ndev,
+			"RX FIFO Receive Packet Underrun Error: RDFD read when empty: tag %04x",
+			(u32)shhwtstamps->hwtstamp);
+	if (unlikely(!(val & XAXIFIFO_TXTS_INT_RC_MASK))) {
+		netdev_info(lp->ndev,
+			"Did't get FIFO tx interrupt: tag %04x",
+			(u32)shhwtstamps->hwtstamp);
+		++lp->tstats.tx_no_interrupt;
+		return;
+	}
+
+	while(skb_queue_len(&lp->ptp_ant_txq) > 0) {
+
+		time64 = axienet_read_tx_hwtstamp(lp, &ptp_tx_ts_tag);
+		if(time64 == 0)
+			return;
+
+		ptp_skb = skb_peek(&lp->ptp_ant_txq);
+		shhwtstamps = skb_hwtstamps((struct sk_buff *)ptp_skb);
+		ptp_tag = shhwtstamps->hwtstamp;
+		cb = (struct axienet_ptp_skb_cb *)ptp_skb->cb;
+		t0 = cb->t0;
+
+		while (ptp_tag != ptp_tx_ts_tag) {
+			++lp->tstats.tx_tag_mismatch;
+			netdev_err(lp->ndev, "Mismatching 2-step tag. Expected %x Got %x",
+				ptp_tag, ptp_tx_ts_tag);
+			lost = 0;
+			tmp_skb = ptp_skb;
+			/* PTP message buffer is always queued before TS */
+			/* but hardware is losing timestamps, so search skb list first */
+			while((tmp_skb = skb_peek((struct sk_buff_head *)tmp_skb))
+                                        != (struct sk_buff *)&lp->ptp_ant_txq) {
+                                ++lost;
+                                shhwtstamps = skb_hwtstamps((struct sk_buff *)tmp_skb);
+                                if(shhwtstamps->hwtstamp == ptp_tx_ts_tag) {
+                                        ptp_skb = tmp_skb;
+                                        ptp_tag = shhwtstamps->hwtstamp;
+                                        netdev_info(lp->ndev,
+                                                "Found matching PTP buffer with tag %x,"
+                                                " FIFO lost %u TX timestamps",
+                                                ptp_tag, lost);
+                                        break;
+                                }
+                        }
+
+			if (ptp_tag != ptp_tx_ts_tag) {
+				/* if not in skb list search forward for the matching TS in the FIFO */
+				time64 = axienet_read_tx_hwtstamp(lp, &ptp_tx_ts_tag);
+				if(time64 == 0)
+					return;
+			}
+		}
+
+		while ((tmp_skb = skb_dequeue(&lp->ptp_ant_txq)) != ptp_skb) {
+			/* clear up packets whose timestamps were lost */
+                        shhwtstamps = skb_hwtstamps((struct sk_buff *)tmp_skb);
+                        netdev_info(lp->ndev, "TX TS tag sending zero response for tag %x",
+                                        (u32)shhwtstamps->hwtstamp);
+                        memset(shhwtstamps, 0, sizeof(struct skb_shared_hwtstamps));
+                        skb_pull(tmp_skb, AXIENET_TS_HEADER_LEN);
+                        skb_tstamp_tx(tmp_skb, shhwtstamps);
+                        dev_kfree_skb_any(tmp_skb);
+                }
+		shhwtstamps = skb_hwtstamps((struct sk_buff *)ptp_skb);
+		memset(shhwtstamps, 0, sizeof(struct skb_shared_hwtstamps));
+		shhwtstamps->hwtstamp = ns_to_ktime(time64);
+		skb_pull(ptp_skb, AXIENET_TS_HEADER_LEN);
+		skb_tstamp_tx(ptp_skb, shhwtstamps);
+		dev_kfree_skb_any(ptp_skb);
+
+		//netdev_info(lp->ndev, "Completed PTP tag %x", ptp_tag);
+
+		t1 = ktime_to_ns(ktime_get_real());
+		trlr = t1 - t0;
+		if(trlr > lp->tstats.tx_rd_max_delay_ns)
+			lp->tstats.tx_rd_max_delay_ns = trlr;
+		lp->tstats.tx_rd_avg_delay_ns =
+			(lp->tstats.tx_rd_avg_delay_ns * lp->tstats.tx_tstamps + trlr) /
+			(lp->tstats.tx_tstamps + 1);
+                ++lp->tstats.tx_tstamps;
+	}
+}
+#else
 #ifdef CONFIG_AXIENET_HAS_MCDMA
 void axienet_tx_hwtstamp(struct axienet_local *lp,
 			 struct aximcdma_bd *cur_p)
@@ -849,7 +1010,6 @@ void axienet_tx_hwtstamp(struct axienet_local *lp,
 	u64 time64;
 	int err = 0;
 	u32 count, len = lp->axienet_config->tx_ptplen;
-	s64 trlr, t0, t1;
 	struct skb_shared_hwtstamps *shhwtstamps =
 		skb_hwtstamps((struct sk_buff *)cur_p->ptp_tx_skb);
 
@@ -857,12 +1017,11 @@ void axienet_tx_hwtstamp(struct axienet_local *lp,
 
 	val = axienet_txts_ior(lp, XAXIFIFO_TXTS_ISR);
 	if (unlikely(!(val & XAXIFIFO_TXTS_INT_RC_MASK))) {
-		//dev_info(lp->dev, "Did't get FIFO tx interrupt %d\n", val);
+		netdev_info(lp->ndev, "Did't get FIFO tx interrupt 0x%x tag %x",
+			val, cur_p->ptp_tx_ts_tag);
 		++lp->tstats.tx_no_interrupt;
 		goto skb_exit;
 	}
-
-	t0 = ktime_to_ns(ktime_get_real());
 
 	/* Hardware loads the TX TS FIFO after DMA TX complete interrupt is asserted,
 	 * wait for the 12 byte timestamp packet
@@ -871,16 +1030,13 @@ void axienet_tx_hwtstamp(struct axienet_local *lp,
 					((val & XAXIFIFO_TXTS_RXFD_MASK) >=
 					len), 0, 1000000);
 
-	t1 = ktime_to_ns(ktime_get_real());
 	if (err) {
-		//netdev_err(lp->ndev, "%s: Didn't get the full timestamp packet",
-		//	   __func__);
+		netdev_err(lp->ndev,
+			"Didn't get the full timestamp packet (only %d bytes): tag %x",
+			len, cur_p->ptp_tx_ts_tag);
 		++lp->tstats.tx_rlr_incomplete;
 		goto skb_exit;
 	}
-	trlr = t1 - t0;
-	if(trlr > lp->tstats.tx_rlr_rd_max_delay_ns)
-		lp->tstats.tx_rlr_rd_max_delay_ns = trlr;
 
 	++lp->tstats.tx_tstamps;
 
@@ -888,7 +1044,7 @@ void axienet_tx_hwtstamp(struct axienet_local *lp,
 	sec  = axienet_txts_ior(lp, XAXIFIFO_TXTS_RXFD);
 	val = axienet_txts_ior(lp, XAXIFIFO_TXTS_RXFD);
 	val = ((val & XAXIFIFO_TXTS_TAG_MASK) >> XAXIFIFO_TXTS_TAG_SHIFT);
-	dev_dbg(lp->dev, "tx_stamp:[%04x] %04x %u %9u\n",
+	netdev_dbg(lp->ndev, "tx_stamp:[%04x] %04x %u %9u\n",
 		cur_p->ptp_tx_ts_tag, val, sec, nsec);
 
 	if (val != cur_p->ptp_tx_ts_tag) {
@@ -901,17 +1057,15 @@ void axienet_tx_hwtstamp(struct axienet_local *lp,
 			val = ((val & XAXIFIFO_TXTS_TAG_MASK) >>
 				XAXIFIFO_TXTS_TAG_SHIFT);
 
-			dev_dbg(lp->dev, "tx_stamp:[%04x] %04x %u %9u\n",
+			netdev_dbg(lp->ndev, "tx_stamp:[%04x] %04x %u %9u\n",
 				cur_p->ptp_tx_ts_tag, val, sec, nsec);
 			if (val == cur_p->ptp_tx_ts_tag)
 				break;
 			count = axienet_txts_ior(lp, XAXIFIFO_TXTS_RFO);
 		}
 		if (val != cur_p->ptp_tx_ts_tag) {
-			dev_info(lp->dev, "Mismatching 2-step tag. Got %x",
-				 val);
-			dev_info(lp->dev, "Expected %x\n",
-				 cur_p->ptp_tx_ts_tag);
+			netdev_info(lp->ndev, "Mismatching 2-step tag. Expected %x Got %x",
+				cur_p->ptp_tx_ts_tag, val);
 		}
 	}
 
@@ -921,6 +1075,9 @@ void axienet_tx_hwtstamp(struct axienet_local *lp,
 
 skb_exit:
 	time64 = sec * NS_PER_SEC + nsec;
+	if (time64 == 0)
+		netdev_info(lp->ndev, "TX TS tag sending zero response for tag %x",
+				cur_p->ptp_tx_ts_tag);
 	memset(shhwtstamps, 0, sizeof(struct skb_shared_hwtstamps));
 	shhwtstamps->hwtstamp = ns_to_ktime(time64);
 #ifndef CONFIG_ANTEVIA_HWTSTAMP_SKB
@@ -934,6 +1091,7 @@ skb_exit:
 	dev_kfree_skb_any((struct sk_buff *)cur_p->ptp_tx_skb);
 	cur_p->ptp_tx_skb = 0;
 }
+#endif
 
 static inline bool is_ptp_os_pdelay_req(struct sk_buff *skb,
 					struct axienet_local *lp)
@@ -1330,6 +1488,8 @@ static int antevia_skb_tstsmp(struct sk_buff **__skb, struct axienet_dma_q *q,
 	struct sk_buff *skb = *__skb;
 	u8 *tmp;
 	struct sk_buff *new_skb;
+	u16 tag;
+        struct axienet_ptp_skb_cb * cb;
 
 #ifdef CONFIG_AXIENET_HAS_MCDMA
 	cur_p = &q->txq_bd_v[q->tx_bd_tail];
@@ -1362,6 +1522,8 @@ static int antevia_skb_tstsmp(struct sk_buff **__skb, struct axienet_dma_q *q,
 
 	if ((skb_shinfo(skb)->tx_flags & SKBTX_HW_TSTAMP)) {
 		cur_p->ptp_tx_ts_tag = prandom_u32_max(XAXIFIFO_TXTS_TAG_MAX) + 1;
+		tag = ++lp->ptp_tag % 4096 ;
+		cur_p->ptp_tx_ts_tag = (tag | lp->port_id);
 		dev_dbg(lp->dev, "tx_tag:[%04x]\n",
 			cur_p->ptp_tx_ts_tag);
 		if (lp->tstamp_config.tx_type == HWTSTAMP_TX_ONESTEP_SYNC ||
@@ -1386,6 +1548,8 @@ static int antevia_skb_tstsmp(struct sk_buff **__skb, struct axienet_dma_q *q,
 			if (packet_flags == TX_TS_OP_TWOSTEP) {
 				skb_shinfo(skb)->tx_flags |= SKBTX_IN_PROGRESS;
 				cur_p->ptp_tx_skb = (phys_addr_t)skb_get(skb);
+				cb = (struct axienet_ptp_skb_cb *)((struct sk_buff *)cur_p->ptp_tx_skb)->cb;
+				cb->t0 = ktime_to_ns(ktime_get_real());
 			}
 		} else {
 			if (axienet_create_tsheader(tmp,
@@ -1394,6 +1558,8 @@ static int antevia_skb_tstsmp(struct sk_buff **__skb, struct axienet_dma_q *q,
 				return NETDEV_TX_BUSY;
 			skb_shinfo(skb)->tx_flags |= SKBTX_IN_PROGRESS;
 			cur_p->ptp_tx_skb = (phys_addr_t)skb_get(skb);
+                        cb = (struct axienet_ptp_skb_cb *)((struct sk_buff *)cur_p->ptp_tx_skb)->cb;
+			cb->t0 = ktime_to_ns(ktime_get_real());
 		}
 	} else {
 		dev_dbg(lp->dev, "tx_tag:NOOP\n");
@@ -2967,9 +3133,9 @@ void axienet_ethtools_get_stats(struct net_device *ndev,
 	data[i++] = lp->tstats.rx_rfo_hi_mark;
 	data[i++] = lp->tstats.tx_rlr_incomplete;
 	data[i++] = lp->tstats.rx_rlr_incomplete;
-	data[i++] = lp->tstats.tx_rlr_rd_avg_delay_ns;
+	data[i++] = lp->tstats.tx_rd_avg_delay_ns;
 	data[i++] = lp->tstats.rx_rlr_rd_avg_delay_ns;
-	data[i++] = lp->tstats.tx_rlr_rd_max_delay_ns;
+	data[i++] = lp->tstats.tx_rd_max_delay_ns;
 	data[i++] = lp->tstats.rx_rlr_rd_max_delay_ns;
 	data[i++] = lp->tstats.tx_tag_mismatch;
 	data[i++] = lp->tstats.rx_tag_mismatch;
@@ -3791,7 +3957,9 @@ static int axienet_probe(struct platform_device *pdev)
 			goto free_netdev;
 		}
 
-#ifndef CONFIG_ANTEVIA_HWTSTAMP_SKB
+#ifdef CONFIG_ANTEVIA_HWTSTAMP_SKB
+		skb_queue_head_init(&lp->ptp_ant_txq);
+#else
 		if (lp->axienet_config->mactype == XAXIENET_10G_25G ||
 		    lp->axienet_config->mactype == XAXIENET_MRMAC) {
 			np = of_parse_phandle(pdev->dev.of_node,
@@ -3885,6 +4053,9 @@ static int axienet_probe(struct platform_device *pdev)
 
 	/* port number passed in fake local MAC set in device tree */
 	ndev->dev_port = ndev->dev_addr[5];
+#ifdef CONFIG_ANTEVIA_HWTSTAMP_SKB
+	lp->port_id = (ndev->dev_addr[5] -1) << 12;
+#endif
 
 	lp->coalesce_count_rx = XAXIDMA_DFT_RX_THRESHOLD;
 	lp->coalesce_count_tx = XAXIDMA_DFT_TX_THRESHOLD;

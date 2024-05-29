@@ -175,6 +175,8 @@
 #define XAXIFIFO_TXTS_RLR	0x00000024 /* Receive Length Register */
 #define XAXIFIFO_TXTS_SRR	0x00000028 /* AXI4-Stream Reset */
 
+#define XAXIFIFO_TXTS_INT_RPURE_MASK	0x80000000
+#define XAXIFIFO_TXTS_INT_RPUE_MASK	0x20000000
 #define XAXIFIFO_TXTS_INT_RC_MASK	0x04000000
 #define XAXIFIFO_TXTS_RXFD_MASK		0x7FFFFFFF
 #define XAXIFIFO_TXTS_RESET_MASK	0x000000A5
@@ -733,9 +735,9 @@ struct hwtstamp_stats {
        u64 rx_rfo_hi_mark;         // v
        u64 tx_rlr_incomplete;      // v
        u64 rx_rlr_incomplete;      // v
-       u64 tx_rlr_rd_avg_delay_ns; // v
+       u64 tx_rd_avg_delay_ns;     // v
        u64 rx_rlr_rd_avg_delay_ns; // v
-       u64 tx_rlr_rd_max_delay_ns; // v
+       u64 tx_rd_max_delay_ns;     // v
        u64 rx_rlr_rd_max_delay_ns; // v
        u64 tx_tag_mismatch;
        u64 rx_tag_mismatch;        // not used, always 0
@@ -874,7 +876,11 @@ struct axienet_local {
 	void __iomem *qbv_regs;
 #endif
 #endif
-#ifndef CONFIG_ANTEVIA_HWTSTAMP_SKB
+#ifdef CONFIG_ANTEVIA_HWTSTAMP_SKB
+	u16 port_id;                    /* diagnostics port id 0-15, used in ptp_tag to identify port */
+	u16 ptp_tag;                    /* diagnostics used for sequential tag numbering */
+	struct sk_buff_head ptp_ant_txq;/* Antevia TX TX skbuff queue */
+#else
 	spinlock_t ptp_tx_lock;		/* PTP tx lock*/
 #endif
 	int eth_irq;
