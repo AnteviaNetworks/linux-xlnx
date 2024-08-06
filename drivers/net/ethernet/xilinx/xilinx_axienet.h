@@ -14,8 +14,8 @@
 #include <linux/spinlock.h>
 #include <linux/interrupt.h>
 #include <linux/if_vlan.h>
+#include <linux/phylink.h>
 #include <linux/net_tstamp.h>
-#include <linux/phy.h>
 #include <linux/of_platform.h>
 
 /* Packet size info */
@@ -366,6 +366,9 @@
 
 #define DELAY_OF_ONE_MILLISEC		1000
 
+/* Xilinx PCS/PMA PHY register for switching 1000BaseX or SGMII */
+#define XLNX_MII_STD_SELECT_REG		0x11
+#define XLNX_MII_STD_SELECT_SGMII	BIT(0)
 #define XAXIENET_NAPI_WEIGHT		64
 
 /* Definition of 1588 PTP in Axi Ethernet IP */
@@ -386,8 +389,13 @@
 #define XXV_JUM_OFFSET			0x00000018
 #define XXV_TICKREG_OFFSET		0x00000020
 #define XXV_STATRX_BLKLCK_OFFSET	0x0000040C
+#define XXV_STAT_AN_STS_OFFSET	0x00000458
+#define XXV_STAT_CORE_SPEED_OFFSET	0x00000498
+#define XXV_STAT_GTWIZ_OFFSET		0x000004A0
 #define XXV_USXGMII_AN_OFFSET		0x000000C8
 #define XXV_USXGMII_AN_STS_OFFSET	0x00000458
+/* Switchable 1/10/25G MAC Register Definitions */
+#define XXVS_AN_CTL1_OFFSET		0x000000e0
 
 /* XXV MAC Register Mask Definitions */
 #define XXV_GT_RESET_MASK	BIT(0)
@@ -400,6 +408,12 @@
 #define XXV_RX_BLKLCK_MASK	BIT(0)
 #define XXV_TICKREG_STATEN_MASK BIT(0)
 #define XXV_MAC_MIN_PKT_LEN	64
+#define XXV_GTWIZ_RESET_DONE	(BIT(0) | BIT(1))
+#define XXV_AN_RESTART_MASK	BIT(11)
+#define XXV_AN_COMPLETE_MASK		BIT(2)
+#define XXV_TX_PAUSE_MASK	BIT(4)
+#define XXV_RX_PAUSE_MASK	BIT(5)
+#define XXV_STAT_CORE_SPEED_10G_MASK	BIT(0)
 
 /* USXGMII Register Mask Definitions  */
 #define USXGMII_AN_EN		BIT(5)
@@ -727,7 +741,11 @@ struct hwtstamp_stats {
  * struct axienet_local - axienet private per device data
  * @ndev:	Pointer for net_device to which it will be attached.
  * @dev:	Pointer to device structure
- * @phy_node:	Pointer to device node structure
+ * @phylink:	Pointer to phylink instance
+ * @phylink_config: phylink configuration settings
+ * @pcs_phy:	Reference to PCS/PMA PHY if used
+ * @pcs:	phylink pcs structure for PCS PHY
+ * @switch_x_sgmii: Whether switchable 1000BaseX/SGMII mode is enabled in the core
  * @clk:	AXI bus clock
  * @mii_bus:	Pointer to MII bus structure
  * @mii_clk_div: MII bus clock divider value
@@ -787,15 +805,19 @@ struct axienet_local {
 	struct net_device *ndev;
 	struct device *dev;
 
-	/* Connection to PHY device */
-	struct device_node *phy_node;
+	struct phylink *phylink;
+	struct phylink_config phylink_config;
+
+	struct mdio_device *pcs_phy;
+	struct phylink_pcs pcs;
+
+	bool switch_x_sgmii;
 
 	/* Clock for AXI bus */
 	struct clk *clk;
 
-	/* MDIO bus data */
-	struct mii_bus *mii_bus;	/* MII bus reference */
-	u8 mii_clk_div; /* MII bus clock divider value */
+	struct mii_bus *mii_bus;
+	u8 mii_clk_div;
 
 	/* IO registers, dma functions and IRQs */
 	resource_size_t regs_start;
@@ -1114,6 +1136,18 @@ static inline u32 axienet_ior(struct axienet_local *lp, off_t offset)
 static inline u32 axinet_ior_read_mcr(struct axienet_local *lp)
 {
 	return axienet_ior(lp, XAE_MDIO_MCR_OFFSET);
+}
+
+static inline void axienet_lock_mii(struct axienet_local *lp)
+{
+	if (lp->mii_bus)
+		mutex_lock(&lp->mii_bus->mdio_lock);
+}
+
+static inline void axienet_unlock_mii(struct axienet_local *lp)
+{
+	if (lp->mii_bus)
+		mutex_unlock(&lp->mii_bus->mdio_lock);
 }
 
 /**
