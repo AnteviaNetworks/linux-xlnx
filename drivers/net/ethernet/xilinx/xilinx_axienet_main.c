@@ -805,7 +805,7 @@ void axienet_tx_hwtstamp(struct axienet_local *lp,
 	u64 time64;
 	/*int err = 0;*/
 	s64 trlr, t0, t1;
-        struct axienet_ptp_skb_cb * cb;
+	struct axienet_ptp_skb_cb * cb;
 	/*
 	 * DMA complete intr occurs once TX PKT has been
 	 * queued for transmission. TX TS is availble only
@@ -870,19 +870,19 @@ void axienet_tx_hwtstamp(struct axienet_local *lp,
 			/* PTP message buffer is always queued before TS */
 			/* but hardware is losing timestamps, so search skb list first */
 			while((tmp_skb = skb_peek((struct sk_buff_head *)tmp_skb))
-                                        != (struct sk_buff *)&lp->ptp_ant_txq) {
-                                ++lost;
-                                shhwtstamps = skb_hwtstamps((struct sk_buff *)tmp_skb);
-                                if(shhwtstamps->hwtstamp == ptp_tx_ts_tag) {
-                                        ptp_skb = tmp_skb;
-                                        ptp_tag = shhwtstamps->hwtstamp;
-                                        netdev_info(lp->ndev,
-                                                "Found matching PTP buffer with tag %x,"
-                                                " FIFO lost %u TX timestamps",
-                                                ptp_tag, lost);
-                                        break;
-                                }
-                        }
+					!= (struct sk_buff *)&lp->ptp_ant_txq) {
+				++lost;
+				shhwtstamps = skb_hwtstamps((struct sk_buff *)tmp_skb);
+				if(shhwtstamps->hwtstamp == ptp_tx_ts_tag) {
+					ptp_skb = tmp_skb;
+					ptp_tag = shhwtstamps->hwtstamp;
+					netdev_info(lp->ndev,
+						"Found matching PTP buffer with tag %x,"
+						" FIFO lost %u TX timestamps",
+						ptp_tag, lost);
+					break;
+				}
+			}
 
 			if (ptp_tag != ptp_tx_ts_tag) {
 				/* if not in skb list search forward for the matching TS in the FIFO */
@@ -894,14 +894,14 @@ void axienet_tx_hwtstamp(struct axienet_local *lp,
 
 		while ((tmp_skb = skb_dequeue(&lp->ptp_ant_txq)) != ptp_skb) {
 			/* clear up packets whose timestamps were lost */
-                        shhwtstamps = skb_hwtstamps((struct sk_buff *)tmp_skb);
-                        netdev_info(lp->ndev, "TX TS tag sending zero response for tag %x",
-                                        (u32)shhwtstamps->hwtstamp);
-                        memset(shhwtstamps, 0, sizeof(struct skb_shared_hwtstamps));
-                        skb_pull(tmp_skb, AXIENET_TS_HEADER_LEN);
-                        skb_tstamp_tx(tmp_skb, shhwtstamps);
-                        dev_kfree_skb_any(tmp_skb);
-                }
+			shhwtstamps = skb_hwtstamps((struct sk_buff *)tmp_skb);
+			netdev_info(lp->ndev, "TX TS tag sending zero response for tag %x",
+					(u32)shhwtstamps->hwtstamp);
+			memset(shhwtstamps, 0, sizeof(struct skb_shared_hwtstamps));
+			skb_pull(tmp_skb, AXIENET_TS_HEADER_LEN);
+			skb_tstamp_tx(tmp_skb, shhwtstamps);
+			dev_kfree_skb_any(tmp_skb);
+		}
 		shhwtstamps = skb_hwtstamps((struct sk_buff *)ptp_skb);
 		memset(shhwtstamps, 0, sizeof(struct skb_shared_hwtstamps));
 		shhwtstamps->hwtstamp = ns_to_ktime(time64);
@@ -918,7 +918,7 @@ void axienet_tx_hwtstamp(struct axienet_local *lp,
 		lp->tstats.tx_rd_avg_delay_ns =
 			(lp->tstats.tx_rd_avg_delay_ns * lp->tstats.tx_tstamps + trlr) /
 			(lp->tstats.tx_tstamps + 1);
-                ++lp->tstats.tx_tstamps;
+		++lp->tstats.tx_tstamps;
 	}
 }
 #else
@@ -1412,7 +1412,7 @@ static int antevia_skb_tstsmp(struct sk_buff **__skb, struct axienet_dma_q *q,
 	u8 *tmp;
 	struct sk_buff *new_skb;
 	u16 tag;
-        struct axienet_ptp_skb_cb * cb;
+	struct axienet_ptp_skb_cb * cb;
 
 #ifdef CONFIG_AXIENET_HAS_MCDMA
 	cur_p = &q->txq_bd_v[q->tx_bd_tail];
@@ -1481,7 +1481,7 @@ static int antevia_skb_tstsmp(struct sk_buff **__skb, struct axienet_dma_q *q,
 				return NETDEV_TX_BUSY;
 			skb_shinfo(skb)->tx_flags |= SKBTX_IN_PROGRESS;
 			cur_p->ptp_tx_skb = (phys_addr_t)skb_get(skb);
-                        cb = (struct axienet_ptp_skb_cb *)((struct sk_buff *)cur_p->ptp_tx_skb)->cb;
+			cb = (struct axienet_ptp_skb_cb *)((struct sk_buff *)cur_p->ptp_tx_skb)->cb;
 			cb->t0 = ktime_to_ns(ktime_get_real());
 		}
 	} else {

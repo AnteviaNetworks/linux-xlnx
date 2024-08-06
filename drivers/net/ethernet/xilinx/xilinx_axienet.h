@@ -915,15 +915,15 @@ struct axienet_local {
 	 *        - the U-plane is stopped when the MAC core is placed in reset.
 	 */
 	struct gpio_desc *rx_fifo_reset;
-        /*
-         * RX packet FIFO enable - starts in enabled state
-         * enabled - passes packets
-         * disabled - no packets pass
-         *
-         * FIFO transitions from enabled to disabled and disabled to enabled
-         * on packet boundaries guaranteeing a packet will not be truncated
-         * or that a partial packet will be transmitted.
-         */
+	/*
+	 * RX packet FIFO enable - starts in enabled state
+	 * enabled - passes packets
+	 * disabled - no packets pass
+	 *
+	 * FIFO transitions from enabled to disabled and disabled to enabled
+	 * on packet boundaries guaranteeing a packet will not be truncated
+	 * or that a partial packet will be transmitted.
+	 */
 	struct gpio_desc *rx_fifo_enable;
 };
 

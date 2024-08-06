@@ -119,7 +119,7 @@ void axienet_shared_mcdma_mac_add(struct axienet_local *lp)
 	}
 	spin_unlock(&list_lock);
 }
-        
+
 void axienet_shared_mcdma_mac_remove(struct axienet_local *lp)
 {
 	struct axienet_local **tail;
@@ -187,17 +187,17 @@ int axienet_shared_mcdma_should_reset(struct axienet_local *lp)
 	// If Only 1 device - just reset as normal, this is
 	// the same as a dedicated MCDMA
 	if(axienet_count_macs() < 2) {
-                netdev_info(lp->ndev,
+		netdev_info(lp->ndev,
 			"MCDMA SM %s only one instance\n",
-                        lp->ndev->name);
+			lp->ndev->name);
 		return 1;
 	}
 
 	spin_lock(&list_lock);
 	// resets will only occur in the LOADED, CLOSED, ERROR and RESET
-        // states.
+	// states.
 	// UNLOADED - transitory state, do not reset
-        // LOADED - only reset if all other known MACs are also in the LOADED
+	// LOADED - only reset if all other known MACs are also in the LOADED
 	//          state. (i.e. first one opened resets the DMA)
 	// OPENED - reset should never occur in this state, Reset occurs at
 	//          the start of the axienet_open() function. At this time the
