@@ -3074,9 +3074,9 @@ static int __maybe_unused axienet_mcdma_probe(struct platform_device *pdev,
 
 	np = of_parse_phandle(pdev->dev.of_node, "axistream-connected",
 			      0);
-	if (IS_ERR(np)) {
+	if (np == NULL) {
 		dev_err(&pdev->dev, "could not find DMA node\n");
-		return ret;
+		return -EINVAL;
 	}
 
 	ret = of_address_to_resource(np, 0, &dmares);
@@ -3911,10 +3911,10 @@ static int axienet_probe(struct platform_device *pdev)
 		} else {
 			np = of_parse_phandle(pdev->dev.of_node,
 					      "xlnx,gtpll", 0);
-			if (IS_ERR(np)) {
+			if (np == NULL) {
 				dev_err(&pdev->dev,
 					"couldn't find GT PLL\n");
-				ret = PTR_ERR(np);
+				ret = -EINVAL;
 				goto free_netdev;
 			}
 
@@ -3936,10 +3936,10 @@ static int axienet_probe(struct platform_device *pdev)
 
 			np = of_parse_phandle(pdev->dev.of_node,
 					      "xlnx,gtctrl", 0);
-			if (IS_ERR(np)) {
+			if (np == NULL) {
 				dev_err(&pdev->dev,
 					"couldn't find GT control\n");
-				ret = PTR_ERR(np);
+				ret = -EINVAL;
 				goto free_netdev;
 			}
 
@@ -3981,9 +3981,9 @@ static int axienet_probe(struct platform_device *pdev)
 	/* Find AXI Stream FIFO */
 	np = of_parse_phandle(pdev->dev.of_node, "axififo-connected",
 			      0);
-	if (IS_ERR(np)) {
+	if (np == NULL) {
 		dev_err(&pdev->dev, "could not find TX Timestamp FIFO\n");
-		ret = PTR_ERR(np);
+		ret = -EINVAL;
 		goto free_netdev;
 	}
 
@@ -4008,10 +4008,10 @@ static int axienet_probe(struct platform_device *pdev)
 	    lp->axienet_config->mactype == XAXIENET_MRMAC) {
 		np = of_parse_phandle(pdev->dev.of_node,
 				      "xlnx,rxtsfifo", 0);
-		if (IS_ERR(np)) {
+		if (np == NULL) {
 			dev_err(&pdev->dev,
 				"couldn't find rx-timestamp FIFO\n");
-			ret = PTR_ERR(np);
+			ret = -EINVAL;
 			goto free_netdev;
 		}
 
