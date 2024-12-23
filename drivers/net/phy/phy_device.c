@@ -32,6 +32,7 @@
 #include <linux/string.h>
 #include <linux/uaccess.h>
 #include <linux/unistd.h>
+#include "phy-core.h"
 
 MODULE_DESCRIPTION("PHY library");
 MODULE_AUTHOR("Andy Fleming");
@@ -3060,12 +3061,14 @@ static int __init phy_init(void)
 err_c45:
 		mdio_bus_exit();
 	}
+	phy_of_notifier_register();
 
 	return rc;
 }
 
 static void __exit phy_exit(void)
 {
+	phy_of_notifier_unregister();
 	phy_driver_unregister(&genphy_c45_driver);
 	phy_driver_unregister(&genphy_driver);
 	mdio_bus_exit();

@@ -3,6 +3,11 @@
 
 libphy-y			:= phy.o phy-c45.o phy-core.o phy_device.o \
 				   linkmode.o
+
+ifdef CONFIG_OF_DYNAMIC
+libphy-y			+= phy_of.o
+endif
+
 mdio-bus-y			+= mdio_bus.o mdio_device.o
 
 ifdef CONFIG_MDIO_DEVICE
