@@ -28,6 +28,9 @@
 #include <linux/marvell_phy.h>
 #include <linux/phy.h>
 #include <linux/sfp.h>
+#if IS_ENABLED(CONFIG_MARVELL_10G_MV88X3540_PTP_PHY)
+#include "marvell10g_ptp.h"           // Alaska MV88X3540 PTP Timestamping Support
+#endif
 
 #define MV_PHY_ALASKA_NBT_QUIRK_MASK	0xfffffffe
 #define MV_PHY_ALASKA_NBT_QUIRK_REV	(MARVELL_PHY_ID_88X3310 | 0xa)
@@ -97,6 +100,10 @@ struct mv3310_priv {
 
 	struct device *hwmon_dev;
 	char *hwmon_name;
+
+#if IS_ENABLED(CONFIG_MARVELL_10G_MV88X3540_PTP_PHY)
+	struct mv3540_ptp_priv ptp;
+#endif
 };
 
 #ifdef CONFIG_HWMON
@@ -403,6 +410,14 @@ static int mv3310_probe(struct phy_device *phydev)
 		    priv->firmware_ver >> 24, (priv->firmware_ver >> 16) & 255,
 		    (priv->firmware_ver >> 8) & 255, priv->firmware_ver & 255);
 
+#if IS_ENABLED(CONFIG_MARVELL_10G_MV88X3540_PTP_PHY)
+        if (phydev->drv->phy_id == MARVELL_PHY_ID_88X3540) {
+		ret = mv3540_ptp_probe(phydev, &priv->ptp);
+		if (ret)
+			return ret;
+	}
+#endif
+
 	/* Powering down the port when not in use saves about 600mW */
 	ret = mv3310_power_down(phydev);
 	if (ret)
@@ -417,7 +432,11 @@ static int mv3310_probe(struct phy_device *phydev)
 
 static void mv3310_remove(struct phy_device *phydev)
 {
+	struct mv3310_priv __maybe_unused *priv = dev_get_drvdata(&phydev->mdio.dev);
 	mv3310_hwmon_config(phydev, false);
+#if IS_ENABLED(CONFIG_MARVELL_10G_MV88X3540_PTP_PHY)
+	mv3540_ptp_remove(&priv->ptp);
+#endif
 }
 
 static int mv3310_suspend(struct phy_device *phydev)
@@ -480,6 +499,11 @@ static int mv3310_config_init(struct phy_device *phydev)
 	priv->rate_match = ((val & MV_V2_PORT_MAC_TYPE_MASK) ==
 			MV_V2_PORT_MAC_TYPE_RATE_MATCH);
 
+#if IS_ENABLED(CONFIG_MARVELL_10G_MV88X3540_PTP_PHY)
+	err = mv3540_ptp_config_init(&priv->ptp);
+	if (err)
+		return err;
+#endif
 	/* Enable EDPD mode - saving 600mW */
 	return mv3310_set_edpd(phydev, ETHTOOL_PHY_EDPD_DFLT_TX_MSECS);
 }
@@ -795,6 +819,23 @@ static struct phy_driver mv3310_drivers[] = {
 		.set_tunable	= mv3310_set_tunable,
 		.remove		= mv3310_remove,
 	},
+	{
+		/* Based on 88E2110, temperature register same as 88E2110 */
+		.phy_id		= MARVELL_PHY_ID_88X3540,
+		.phy_id_mask	= MARVELL_PHY_ID_MASK,
+		.name		= "mv88x3540",
+		.get_features	= mv3310_get_features,
+		.config_init	= mv3310_config_init,
+		.probe		= mv3310_probe,
+		.suspend	= mv3310_suspend,
+		.resume		= mv3310_resume,
+		.config_aneg	= mv3310_config_aneg,
+		.aneg_done	= mv3310_aneg_done,
+		.read_status	= mv3310_read_status,
+		.get_tunable	= mv3310_get_tunable,
+		.set_tunable	= mv3310_set_tunable,
+		.remove		= mv3310_remove,
+	},
 };
 
 module_phy_driver(mv3310_drivers);
@@ -802,6 +843,7 @@ module_phy_driver(mv3310_drivers);
 static struct mdio_device_id __maybe_unused mv3310_tbl[] = {
 	{ MARVELL_PHY_ID_88X3310, MARVELL_PHY_ID_MASK },
 	{ MARVELL_PHY_ID_88E2110, MARVELL_PHY_ID_MASK },
+	{ MARVELL_PHY_ID_88X3540, MARVELL_PHY_ID_MASK },
 	{ },
 };
 MODULE_DEVICE_TABLE(mdio, mv3310_tbl);
