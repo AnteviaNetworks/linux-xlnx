@@ -880,6 +880,7 @@ struct axienet_local {
 	u8 *tx_ptpheader;
 #endif
 #endif
+	bool phy_timestamping;
 	struct clk *aclk;
 	struct clk *eth_sclk;
 	struct clk *eth_refclk;

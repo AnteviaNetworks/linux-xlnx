@@ -1398,34 +1398,15 @@ static inline u8 ptp_os(struct sk_buff *skb, struct axienet_local *lp)
 }
 
 #ifdef CONFIG_ANTEVIA_HWTSTAMP_SKB
-static int antevia_skb_tstsmp(struct sk_buff **__skb, struct axienet_dma_q *q,
-			      struct net_device *ndev)
+static int antevia_skb_tstmp_headroom(struct sk_buff **__skb)
 {
-#ifdef CONFIG_AXIENET_HAS_MCDMA
-	struct aximcdma_bd *cur_p;
-#else
-	struct axidma_bd *cur_p;
-#endif
-	struct axienet_local *lp = netdev_priv(ndev);
 	struct sk_buff *old_skb = *__skb;
-	struct sk_buff *skb = *__skb;
-	u8 *tmp;
 	struct sk_buff *new_skb;
-	u16 tag;
-	struct axienet_ptp_skb_cb * cb;
-
-#ifdef CONFIG_AXIENET_HAS_MCDMA
-	cur_p = &q->txq_bd_v[q->tx_bd_tail];
-#else
-	cur_p = &q->tx_bd_v[q->tx_bd_tail];
-#endif
-
 	if (skb_headroom(old_skb) < AXIENET_TS_HEADER_LEN) {
 		new_skb =
 		skb_realloc_headroom(old_skb,
 				     AXIENET_TS_HEADER_LEN);
 		if (!new_skb) {
-			dev_err(&ndev->dev, "failed to allocate new socket buffer\n");
 			dev_kfree_skb_any(old_skb);
 			return NETDEV_TX_BUSY;
 		}
@@ -1437,8 +1418,55 @@ static int antevia_skb_tstsmp(struct sk_buff **__skb, struct axienet_dma_q *q,
 			skb_set_owner_w(new_skb, old_skb->sk);
 		dev_kfree_skb_any(old_skb);
 		*__skb = new_skb;
-		skb = new_skb;
 	}
+	return NETDEV_TX_OK;
+}
+
+static int antevia_skb_tstsmp_noop(struct sk_buff **__skb, struct axienet_dma_q *q,
+			      struct net_device *ndev)
+{
+	struct sk_buff *skb;
+	u8 *tmp;
+
+	if(antevia_skb_tstmp_headroom(__skb)) {
+		dev_err(&ndev->dev, "failed to allocate new socket buffer\n");
+		return NETDEV_TX_BUSY;
+	}
+	skb = *__skb;
+
+	tmp = skb_push(skb, AXIENET_TS_HEADER_LEN);
+	memset(tmp, 0, AXIENET_TS_HEADER_LEN);
+
+	if (axienet_create_tsheader(tmp, TX_TS_OP_NOOP, q))
+		return NETDEV_TX_BUSY;
+	return NETDEV_TX_OK;
+}
+
+static int antevia_skb_tstsmp(struct sk_buff **__skb, struct axienet_dma_q *q,
+			      struct net_device *ndev)
+{
+#ifdef CONFIG_AXIENET_HAS_MCDMA
+	struct aximcdma_bd *cur_p;
+#else
+	struct axidma_bd *cur_p;
+#endif
+	struct axienet_local *lp = netdev_priv(ndev);
+	struct sk_buff *skb;
+	u8 *tmp;
+	u16 tag;
+	struct axienet_ptp_skb_cb * cb;
+
+#ifdef CONFIG_AXIENET_HAS_MCDMA
+	cur_p = &q->txq_bd_v[q->tx_bd_tail];
+#else
+	cur_p = &q->tx_bd_v[q->tx_bd_tail];
+#endif
+
+	if(antevia_skb_tstmp_headroom(__skb)) {
+		dev_err(&ndev->dev, "failed to allocate new socket buffer\n");
+		return NETDEV_TX_BUSY;
+	}
+	skb = *__skb;
 
 	tmp = skb_push(skb, AXIENET_TS_HEADER_LEN);
 	memset(tmp, 0, AXIENET_TS_HEADER_LEN);
@@ -1672,16 +1700,24 @@ static int axienet_queue_xmit(struct sk_buff *skb,
 		netif_wake_queue(ndev);
 	}
 
+	if (lp->phy_timestamping) {
+		if(antevia_skb_tstsmp_noop(&skb, q, ndev)) {
+			spin_unlock_irqrestore(&q->tx_lock, flags);
+			return NETDEV_TX_BUSY;
+		}
+		skb_tx_timestamp(skb);
+	} else {
 #ifdef CONFIG_XILINX_AXI_EMAC_HWTSTAMP
 #ifdef CONFIG_ANTEVIA_HWTSTAMP_SKB
-	if (antevia_skb_tstsmp(&skb, q, ndev)) {
+		if (antevia_skb_tstsmp(&skb, q, ndev)) {
 #else
-	if (axienet_skb_tstsmp(&skb, q, ndev)) {
+		if (axienet_skb_tstsmp(&skb, q, ndev)) {
 #endif
-		spin_unlock_irqrestore(&q->tx_lock, flags);
-		return NETDEV_TX_BUSY;
+			spin_unlock_irqrestore(&q->tx_lock, flags);
+			return NETDEV_TX_BUSY;
+		}
+#endif
 	}
-#endif
 
 	if (skb->ip_summed == CHECKSUM_PARTIAL && !lp->eth_hasnobuf &&
 	    lp->axienet_config->mactype == XAXIENET_1G) {
@@ -1889,11 +1925,14 @@ static int axienet_recv(struct net_device *ndev, int budget,
 			shhwtstamps->hwtstamp = ns_to_ktime(time64);
 		} else if (lp->axienet_config->mactype == XAXIENET_10G_25G ||
 			   lp->axienet_config->mactype == XAXIENET_MRMAC) {
+
+			if(!lp->phy_timestamping) {
 #ifdef CONFIG_ANTEVIA_HWTSTAMP_SKB
-			antevia_rx_hwtstamp(lp, skb);
+				antevia_rx_hwtstamp(lp, skb);
 #else
-			axienet_rx_hwtstamp(lp, skb);
+				axienet_rx_hwtstamp(lp, skb);
 #endif
+			}
 		}
 #endif
 		skb->protocol = eth_type_trans(skb, ndev);
@@ -1918,7 +1957,9 @@ static int axienet_recv(struct net_device *ndev, int budget,
 			skb->ip_summed = CHECKSUM_COMPLETE;
 		}
 
-		netif_receive_skb(skb);
+		if(lp->phy_timestamping)
+			if (!skb_defer_rx_timestamp(skb))
+				netif_receive_skb(skb);
 
 		size += length;
 		packets++;
@@ -2068,6 +2109,16 @@ static irqreturn_t axienet_eth_irq(int irq, void *_ndev)
 	return IRQ_HANDLED;
 }
 
+static bool is_phy_timestamping(struct device_node *np)
+{
+	bool is_timestamping = false;
+	struct phy_device *phy_dev = of_phy_find_device(np);
+	if(phy_dev != NULL)
+		is_timestamping = (phy_dev->mii_ts != NULL);
+	put_device(&phy_dev->mdio.dev);
+	return is_timestamping;
+}
+
 /**
  * axienet_open - Driver open routine.
  * @ndev:	Pointer to net_device structure
@@ -2108,7 +2159,11 @@ static int axienet_open(struct net_device *ndev)
 			dev_err(lp->dev, "phylink_of_phy_connect() failed: %d\n", ret);
 			return ret;
 		}
-
+		lp->phy_timestamping = is_phy_timestamping(lp->dev->of_node);
+		if(lp->phy_timestamping)
+			netdev_info(ndev, "MAC expects PHY to do PTP timestamping\n");
+		else
+			netdev_info(ndev, "MAC will do PTP timestamping\n");
 		phylink_start(lp->phylink);
 	}
 
