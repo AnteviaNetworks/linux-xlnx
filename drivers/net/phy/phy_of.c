@@ -105,7 +105,7 @@ static int of_phy_notify(struct notifier_block *nb, unsigned long action,
 			break;
 		addr = of_mdio_parse_addr(&mdio->dev, rd->dn);
 		if(addr < 0) {
-			dev_info(&mdio->dev, "phy %pOFfp missing address - add reg property\n",
+			dev_err(&mdio->dev, "phy %pOFfp missing address - add reg property\n",
 						 rd->dn);
 			put_device(&mdio->dev);
 			break;
@@ -122,7 +122,7 @@ static int of_phy_notify(struct notifier_block *nb, unsigned long action,
 			put_device(&mdio->dev);
 			break;
 		}
-		dev_info(&mdio->dev, "add phy %pOFf\n", rd->dn);
+		dev_dbg(&mdio->dev, "add phy %pOFf\n", rd->dn);
 		put_device(&mdio->dev);
 		return NOTIFY_OK;
 
@@ -144,7 +144,7 @@ static int of_phy_notify(struct notifier_block *nb, unsigned long action,
 			break;
 		}
 		phy_device_remove(phy);
-		dev_info(&phy->mdio.dev, "remove phy %pOFf\n", rd->dn);
+		dev_dbg(&phy->mdio.dev, "remove phy %pOFf\n", rd->dn);
 		put_device(&phy->mdio.dev);
 		return NOTIFY_OK;
 	}

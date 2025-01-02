@@ -1957,9 +1957,8 @@ static int axienet_recv(struct net_device *ndev, int budget,
 			skb->ip_summed = CHECKSUM_COMPLETE;
 		}
 
-		if(lp->phy_timestamping)
-			if (!skb_defer_rx_timestamp(skb))
-				netif_receive_skb(skb);
+		if (!skb_defer_rx_timestamp(skb))
+			netif_receive_skb(skb);
 
 		size += length;
 		packets++;
@@ -4172,10 +4171,19 @@ static int axienet_probe(struct platform_device *pdev)
 			}
 		}
 
-		ret = axienet_mdio_setup(lp);
-		if (ret)
-			dev_warn(&pdev->dev,
-				 "error registering MDIO bus: %d\n", ret);
+		if (lp->axienet_config->mactype != XAXIENET_10G_25G) {
+			/*
+			* Management Data Input/Output (MDIO) master:
+			* The 10G/25G High Speed Ethernet Subsystem
+			* IP does not provide an MDIO master. The
+			* contents of the appropriate MDIO registers
+			* are available in the status signals.
+			*/
+			ret = axienet_mdio_setup(lp);
+			if (ret)
+				dev_warn(&pdev->dev,
+					"error registering MDIO bus: %d\n", ret);
+		}
 		lp->pcs_phy = of_mdio_find_device(np);
 		if (!lp->pcs_phy) {
 			ret = -EPROBE_DEFER;
