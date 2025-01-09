@@ -11,7 +11,7 @@
 #include <linux/phy.h>
 #include <linux/ptp_classify.h>
 #include <linux/ptp_clock_kernel.h>                                                                  
-#include "marvell_ptp.h"
+#include "marvell10g_ptp.h"
 
 
 #define MV_SKB_CB(skb)		((struct mv3540_ptp_skb_cb *)(skb)->cb)
