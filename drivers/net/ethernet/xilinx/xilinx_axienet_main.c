@@ -1422,17 +1422,10 @@ static int antevia_skb_tstmp_headroom(struct sk_buff **__skb)
 	return NETDEV_TX_OK;
 }
 
-static int antevia_skb_tstsmp_noop(struct sk_buff **__skb, struct axienet_dma_q *q,
+static int antevia_skb_tstsmp_noop(struct sk_buff *skb, struct axienet_dma_q *q,
 			      struct net_device *ndev)
 {
-	struct sk_buff *skb;
 	u8 *tmp;
-
-	if(antevia_skb_tstmp_headroom(__skb)) {
-		dev_err(&ndev->dev, "failed to allocate new socket buffer\n");
-		return NETDEV_TX_BUSY;
-	}
-	skb = *__skb;
 
 	tmp = skb_push(skb, AXIENET_TS_HEADER_LEN);
 	memset(tmp, 0, AXIENET_TS_HEADER_LEN);
@@ -1701,11 +1694,24 @@ static int axienet_queue_xmit(struct sk_buff *skb,
 	}
 
 	if (lp->phy_timestamping) {
-		if(antevia_skb_tstsmp_noop(&skb, q, ndev)) {
+		/*
+		 * Ensure there is headroom in the packet for the
+		 * MAC PTP control header (we will set it to noop)
+		 */
+		if(antevia_skb_tstmp_headroom(&skb)) {
 			spin_unlock_irqrestore(&q->tx_lock, flags);
 			return NETDEV_TX_BUSY;
 		}
+		/*
+		 * Now clone the buffer for the PHY, prior to
+		 * pushing the MAC PTP control header
+		 */
 		skb_tx_timestamp(skb);
+		/*
+		 * now push the MAC PTP control header as a NOOP
+		 * This doesn't fail
+		 */
+		(void)antevia_skb_tstsmp_noop(skb, q, ndev);
 	} else {
 #ifdef CONFIG_XILINX_AXI_EMAC_HWTSTAMP
 #ifdef CONFIG_ANTEVIA_HWTSTAMP_SKB
@@ -2108,13 +2114,19 @@ static irqreturn_t axienet_eth_irq(int irq, void *_ndev)
 	return IRQ_HANDLED;
 }
 
-static bool is_phy_timestamping(struct device_node *np)
+static bool is_phy_timestamping(struct device_node *dn)
 {
 	bool is_timestamping = false;
-	struct phy_device *phy_dev = of_phy_find_device(np);
-	if(phy_dev != NULL)
-		is_timestamping = (phy_dev->mii_ts != NULL);
-	put_device(&phy_dev->mdio.dev);
+	struct phy_device *phy_dev;
+	struct device_node *phy_node =  of_parse_phandle(dn, "phy-handle", 0);
+	if(phy_node != NULL) {
+		phy_dev = of_phy_find_device(phy_node);
+		of_node_put(phy_node);
+		if(phy_dev != NULL) {
+			is_timestamping = (phy_dev->mii_ts != NULL);
+		}
+		put_device(&phy_dev->mdio.dev);
+	}
 	return is_timestamping;
 }
 
@@ -2637,9 +2649,15 @@ static int axienet_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 		return phylink_mii_ioctl(lp->phylink, rq, cmd);
 #ifdef CONFIG_XILINX_AXI_EMAC_HWTSTAMP
 	case SIOCSHWTSTAMP:
-		return axienet_set_ts_config(lp, rq);
+		if (lp->phy_timestamping)
+			return phylink_mii_ioctl(lp->phylink, rq, cmd);
+		else
+			return axienet_set_ts_config(lp, rq);
 	case SIOCGHWTSTAMP:
-		return axienet_get_ts_config(lp, rq);
+		if (lp->phy_timestamping)
+			return phylink_mii_ioctl(lp->phylink, rq, cmd);
+		else
+			return axienet_get_ts_config(lp, rq);
 #endif
 	default:
 		return -EOPNOTSUPP;
