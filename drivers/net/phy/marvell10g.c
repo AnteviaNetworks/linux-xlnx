@@ -83,6 +83,8 @@ enum {
 	MV_V2_PORT_CTRL		= 0xf001,
 	MV_V2_PORT_CTRL_SWRST	= BIT(15),
 	MV_V2_PORT_CTRL_PWRDOWN = BIT(11),
+	/* 88X3540 Port specific software reset bit */
+	MV_V2_PORT_CTRL_PSWRST  = BIT(4),
 	MV_V2_PORT_MAC_TYPE_MASK = 0x7,
 	MV_V2_PORT_MAC_TYPE_RATE_MATCH = 0x6,
 	/* Temperature control/read registers (88X3310 only) */
@@ -265,7 +267,9 @@ static int mv3310_power_down(struct phy_device *phydev)
 static int mv3310_power_up(struct phy_device *phydev)
 {
 	struct mv3310_priv *priv = dev_get_drvdata(&phydev->mdio.dev);
-	int ret;
+	int ret, val;
+	int reset = phydev->drv->phy_id == MARVELL_PHY_ID_88X3540 ?
+			MV_V2_PORT_CTRL_PSWRST : MV_V2_PORT_CTRL_SWRST;
 
 	ret = phy_clear_bits_mmd(phydev, MDIO_MMD_VEND2, MV_V2_PORT_CTRL,
 				 MV_V2_PORT_CTRL_PWRDOWN);
@@ -274,8 +278,14 @@ static int mv3310_power_up(struct phy_device *phydev)
 	    priv->firmware_ver < 0x00030000)
 		return ret;
 
-	return phy_set_bits_mmd(phydev, MDIO_MMD_VEND2, MV_V2_PORT_CTRL,
-				MV_V2_PORT_CTRL_SWRST);
+	ret = phy_set_bits_mmd(phydev, MDIO_MMD_VEND2, MV_V2_PORT_CTRL,
+				reset);
+	if (ret < 0)
+		return ret;
+	return phy_read_mmd_poll_timeout(phydev, MDIO_MMD_VEND2,
+					 MV_V2_PORT_CTRL, val,
+					 !(val & reset),
+					 5000, 100000, true);
 }
 
 static int mv3310_reset(struct phy_device *phydev, u32 unit)
@@ -344,6 +354,24 @@ static int mv3310_set_edpd(struct phy_device *phydev, u16 edpd)
 		err = mv3310_reset(phydev, MV_PCS_BASE_T);
 
 	return err;
+}
+
+/* Set Rate Matching for MAC PCS interface, requires reset to activate */
+static int mv3540_set_rate(struct phy_device *phydev, int rate)
+{
+	int mask = MV_V2_PORT_CTRL_PSWRST |MV_V2_PORT_MAC_TYPE_MASK;
+	int val = MV_V2_PORT_CTRL_PSWRST |rate;
+	int err;
+
+	err = phy_modify_mmd(phydev, MDIO_MMD_VEND2, MV_V2_PORT_CTRL,
+			mask, val);
+	if (err)
+		return err;
+
+	return phy_read_mmd_poll_timeout(phydev, MDIO_MMD_VEND2,
+					 MV_V2_PORT_CTRL, val,
+					 !(val & MV_V2_PORT_CTRL_PSWRST),
+					 5000, 100000, true);
 }
 
 static int mv3310_sfp_insert(void *upstream, const struct sfp_eeprom_id *id)
@@ -487,6 +515,42 @@ static int mv3310_config_init(struct phy_device *phydev)
 		return -ENODEV;
 
 	phydev->mdix_ctrl = ETH_TP_MDI_AUTO;
+
+	/* Power up so reset works */
+	err = mv3310_power_up(phydev);
+	if (err)
+		return err;
+
+	val = phy_read_mmd(phydev, MDIO_MMD_VEND2, MV_V2_PORT_CTRL);
+	if (val < 0)
+		return val;
+	priv->rate_match = ((val & MV_V2_PORT_MAC_TYPE_MASK) ==
+			MV_V2_PORT_MAC_TYPE_RATE_MATCH);
+
+	/* Enable EDPD mode - saving 600mW */
+	return mv3310_set_edpd(phydev, ETHTOOL_PHY_EDPD_DFLT_TX_MSECS);
+}
+
+static int mv3540_config_init(struct phy_device *phydev)
+{
+	struct mv3310_priv *priv = dev_get_drvdata(&phydev->mdio.dev);
+	int err;
+	int val;
+
+	/* Check that the PHY interface type is compatible */
+	if (phydev->interface != PHY_INTERFACE_MODE_SGMII &&
+	    phydev->interface != PHY_INTERFACE_MODE_2500BASEX &&
+	    phydev->interface != PHY_INTERFACE_MODE_XAUI &&
+	    phydev->interface != PHY_INTERFACE_MODE_RXAUI &&
+	    phydev->interface != PHY_INTERFACE_MODE_10GBASER)
+		return -ENODEV;
+
+	phydev->mdix_ctrl = ETH_TP_MDI_AUTO;
+
+	/* Set Rate Matching for MAC interface */
+	err = mv3540_set_rate(phydev, MV_V2_PORT_MAC_TYPE_RATE_MATCH);
+	if (err)
+		return err;
 
 	/* Power up so reset works */
 	err = mv3310_power_up(phydev);
@@ -825,7 +889,7 @@ static struct phy_driver mv3310_drivers[] = {
 		.phy_id_mask	= MARVELL_PHY_ID_MASK,
 		.name		= "mv88x3540",
 		.get_features	= mv3310_get_features,
-		.config_init	= mv3310_config_init,
+		.config_init	= mv3540_config_init,
 		.probe		= mv3310_probe,
 		.suspend	= mv3310_suspend,
 		.resume		= mv3310_resume,
