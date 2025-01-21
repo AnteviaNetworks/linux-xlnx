@@ -1938,6 +1938,9 @@ static int axienet_recv(struct net_device *ndev, int budget,
 #else
 				axienet_rx_hwtstamp(lp, skb);
 #endif
+			} else {
+				/* remove unused 16 byte MAC timestamp header */
+				skb_pull(skb, 16);
 			}
 		}
 #endif
@@ -1963,8 +1966,7 @@ static int axienet_recv(struct net_device *ndev, int budget,
 			skb->ip_summed = CHECKSUM_COMPLETE;
 		}
 
-		if (!skb_defer_rx_timestamp(skb))
-			netif_receive_skb(skb);
+		netif_receive_skb(skb);
 
 		size += length;
 		packets++;

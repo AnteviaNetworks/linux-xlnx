@@ -20,11 +20,7 @@ struct mv3540_ptp_priv {
 	struct sk_buff_head tx_skb_queue;
 
 	int hwts_tx_en;
-	u32 ts_dep_lower;
-	u32 ts_dep_upper;
 	int hwts_rx_en;
-	u32 ts_arr_lower;
-	u32 ts_arr_upper;
 	int ptp_transport;
 	int ptp_version;
 };
