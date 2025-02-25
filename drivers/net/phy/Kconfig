@@ -202,7 +202,7 @@ config MARVELL_10G_PHY
 	  Support for the Marvell Alaska MV88X3310 and compatible PHYs.
 
 config MARVELL_10G_MV88X3540_PTP_PHY
-	tristate "Marvell Alaska 10Gbit 88X3540 PHY PTP Timestamping"
+	bool "Marvell Alaska 10Gbit 88X3540 PHY PTP Timestamping"
 	depends on NETWORK_PHY_TIMESTAMPING
 	depends on MARVELL_10G_PHY
 	help
