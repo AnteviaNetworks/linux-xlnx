@@ -161,7 +161,7 @@ mp2856_set_pout_exponent(struct i2c_client *client,
     u16 reg_data;
 
     ret = mp2856_raw_read_word(client,
-            MP2856_REGISTER_PAGE_2, MP2856_MUL1_CUR_SCALE_R1, ~GENMASK(10,6));
+            MP2856_REGISTER_PAGE_2, MP2856_MUL1_CUR_SCALE_R1, ~(u16)(GENMASK(10,6)));
 
     if (ret < 0)
         return ret;
